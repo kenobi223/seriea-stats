@@ -12,6 +12,7 @@ Sicuro da rieseguire: non tocca il disco, scrive solo in Redis. I blocchi già
 presenti in Redis più recenti dei file locali NON vengono sovrascritti.
 """
 import argparse
+import json
 import os
 import sys
 import time
@@ -31,18 +32,20 @@ def main():
         print("ERRORE: imposta REDIS_URL (es. REDIS_URL=redis://... .venv/bin/python scripts/migrate_to_redis.py)")
         sys.exit(1)
 
+    import redis as redis_mod
+    r = redis_mod.from_url(kv._redis_url(), socket_timeout=5, socket_connect_timeout=5)
+    r.ping()
+
     ok = skipped = 0
     for name, path in kv.KEYS.items():
         if not os.path.exists(path):
             print(f"  - {name}: nessun file locale, salto")
             continue
         with open(path, "r", encoding="utf-8") as f:
-            import json
             data = json.load(f)
 
-        # non sovrascrivere un blocco remoto più recente del file locale
-        remote = kv.read_json(name)
-        if remote is not None:
+        # non sovrascrivere un blocco REMOTO già presente e più recente del file locale
+        if r.exists("seriea:" + name):
             local_mtime = os.path.getmtime(path)
             if local_mtime < time.time() - 30:
                 print(f"  ~ {name}: già presente in Redis, salto (preservo il remoto)")

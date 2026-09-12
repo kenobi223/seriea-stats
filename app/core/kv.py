@@ -33,6 +33,15 @@ KEYS = {
 }
 
 
+def _redis_url():
+    """Normalizza REDIS_URL: Upstash richiede TLS (rediss), accettiamo anche
+    la URL `redis://...` che Upstash mostra nella console."""
+    url = config.REDIS_URL or ""
+    if url.startswith("redis://") and "upstash.io" in url:
+        return url.replace("redis://", "rediss://", 1)
+    return url
+
+
 def _redis():
     global _client, _tried
     if not config.REDIS_URL:
@@ -47,7 +56,7 @@ def _redis():
         try:
             import redis
             _client = redis.from_url(
-                config.REDIS_URL, socket_timeout=5, socket_connect_timeout=5,
+                _redis_url(), socket_timeout=5, socket_connect_timeout=5,
                 retry_on_timeout=True)
             _client.ping()
             log.info("persistenza remota Redis attiva (%s)", config.REDIS_URL.split("@")[-1])
