@@ -1,5 +1,6 @@
-# Render blueprint (opzionale): crea il servizio dal repository GitHub.
-# In alternativa: Dashboard -> New -> Web Service -> select repo.
+# Render blueprint: crea il servizio dal repository GitHub.
+# Il piano Free non supporta i dischi persistenti: lo stato vive su Upstash Redis.
+# Compila le variabili (Environment in dashboard) DOPO la creazione.
 services:
   - type: web
     name: seriea-stats
@@ -8,13 +9,15 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /healthz
     envVars:
-      - key: REDIS_URL
-        value: REDIS_URL_PLACEHOLDER   # Upstash Redis free
-        sync: false
       - key: TELEGRAM_BOT_TOKEN
-        value: TELEGRAM_TOKEN_PLACEHOLDER
         sync: false
-    disk:
-      name: seriea-data
-      mountPath: /app/data
-      sizeGB: 1
+      - key: TELEGRAM_OWNER_IDS
+        sync: false
+      - key: SUBS_COUPONS
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: HEARTBEAT_INTERVAL_SECONDS
+        value: "540"
+      - key: PUBLIC_URL
+        sync: false
