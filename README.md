@@ -301,6 +301,43 @@ Utile: `/healthz` risponde `{"ok": true, "updated": ...}`; la dashboard web
 resta su `:PORT` (porta assegnata da Render, HTTPS incluso). Il tunnel
 `cloudflared` non serve: Render espone già la web.
 
+### Deploy su Koyeb free (scelta rapida, con self-heartbeat)
+
+Koyeb free: **512MB RAM / 0.1 vCPU / 2GB SSD**, una istanza per organizzazione,
+regioni Francoforte o Washington. L'istanza free **si sospende dopo ~1h senza
+traffico** (scale-to-zero non configurabile) e **non supporta Volumes**: i dati
+devono stare su **Upstash Redis** (già gestito da `app/core/kv.py`). Per non
+addormentarsi il progetto ha un **self-heartbeat** integrato: se imposti
+`PUBLIC_URL`, ogni 25 min si chiama da solo `PUBLIC_URL/healthz`.
+
+```sh
+git add -A && git commit -m "Serie A Stats"     # poi push su GitHub
+```
+
+Passi:
+1. **Persistenza**: istanza free su upstash.com (no carta) → copia `REDIS_URL`.
+2. **GitHub**: crea un repo (anche privato) e fai push del progetto.
+3. **Koyeb** (console.koyeb.com) → `Create App` → collega il repo GitHub →
+   scegli **Dockerfile** come builder (quello in root include Tor + Python).
+4. **Instance type**: Free. **Porta esposta**: 8080 (Koyeb inietta `PORT`).
+5. **Health check** HTTP: path `/healthz`.
+6. **Env** (dashboard del servizio):
+   - `TELEGRAM_BOT_TOKEN` (da @BotFather)
+   - `TELEGRAM_OWNER_IDS` (chat_id del capo)
+   - `REDIS_URL` (Upstash, fondamentale: filesystem effimero)
+   - `PUBLIC_URL=https://<app>-<org>.koyeb.app` (heartbeat anti-sleep)
+   - opzionali: `SUBS_COUPONS`, `UPDATE_INTERVAL_SECONDS=900` (su 0.1 vCPU il
+     ciclo può durare qualche minuto), `HEARTBEAT_INTERVAL_SECONDS`
+7. **Deploy** e verifica:
+   - log: `scheduler: ciclo completato ... N partite`, `Telegram bot ... online`
+   - `/healthz` risponde `{"ok": true, ...}`
+   - scrivi `/menu` al bot e controlla il funzionamento.
+
+Note: l'offset Telegram è ora persistito (`tg_offset.json` su Redis), quindi i
+restart non perdono il polling. Il token/owner/coupon non sono più nel codice:
+si leggono da `.env` in locale e dalle env vars sul cloud (il file `.env` e i
+`data/`, `logs/` sono in `.gitignore`).
+
 ### Alternativa: Oracle Cloud Always Free (VM propria, Tor in contenitore separato)
 
 Vedi sezione precedente `deploy/package.sh` + `deploy/setup-oracle.sh`: la VM
