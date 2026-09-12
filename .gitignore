@@ -1,0 +1,17 @@
+# Ambiente ed eseguibili locali
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Dati e log generati a runtime
+data/
+logs/
+
+# Binario cloudflared (grande, va scaricato al deploy)
+bin/cloudflared
+
+# IDE / OS
+.DS_Store
+*.swp

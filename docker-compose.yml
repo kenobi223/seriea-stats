@@ -1,0 +1,35 @@
+services:
+  tor:
+    build: ./tor
+    restart: always
+    networks:
+      - seriea-net
+    # Exposing 9050/9051 loocale per debug; l'app si connette a tor:9050/9051
+    ports:
+      - "127.0.0.1:9050:9050"
+      - "127.0.0.1:9051:9051"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.oc
+    restart: always
+    environment:
+      - TOR_SOCKS_PROXY=socks5h://tor:9050
+      - TOR_CONTROL_HOST=tor
+      - TOR_CONTROL_PORT=9051
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_ALLOWED_IDS=${TELEGRAM_ALLOWED_IDS:-}
+    volumes:
+      - ./data:/app/data
+      - ./assets:/app/assets
+    networks:
+      - seriea-net
+    ports:
+      - "127.0.0.1:8765:8765"
+    depends_on:
+      - tor
+
+networks:
+  seriea-net:
+    driver: bridge

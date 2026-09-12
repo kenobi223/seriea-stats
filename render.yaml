@@ -1,0 +1,20 @@
+# Render blueprint (opzionale): crea il servizio dal repository GitHub.
+# In alternativa: Dashboard -> New -> Web Service -> select repo.
+services:
+  - type: web
+    name: seriea-stats
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: REDIS_URL
+        value: REDIS_URL_PLACEHOLDER   # Upstash Redis free
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        value: TELEGRAM_TOKEN_PLACEHOLDER
+        sync: false
+    disk:
+      name: seriea-data
+      mountPath: /app/data
+      sizeGB: 1

@@ -1,0 +1,6 @@
+requests>=2.31
+beautifulsoup4>=4.12
+flask>=3.0
+pysocks>=1.7
+redis>=5.0
+python-dotenv>=1.0

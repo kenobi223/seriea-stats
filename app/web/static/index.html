@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Serie A · Statistiche e Pronostici</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>⚽ Serie A Stats</h1>
+    <span class="sub">classifica · forma · arbitri · quote · pronostici</span>
+    <div class="status">
+      <span class="live-dot"></span>
+      <span id="last-updated">—</span>
+      <span id="cycle-status" class="muted"></span>
+    </div>
+  </header>
+
+  <nav id="tabs">
+    <button class="active" data-tab="matches">Partite e pronostici</button>
+    <button data-tab="results">Risultati e live</button>
+    <button data-tab="tracking">Onestà del modello</button>
+    <button data-tab="ai">Chiedi all'AI</button>
+    <button data-tab="errors">Errori di quota</button>
+    <button data-tab="standings">Classifica e squadre</button>
+    <button data-tab="manual">Import quote (Sisal/SNAI)</button>
+    <button data-tab="sources">Fonti dati</button>
+  </nav>
+
+  <main>
+    <section class="tab active" id="tab-matches"></section>
+    <section class="tab" id="tab-results"></section>
+    <section class="tab" id="tab-tracking"></section>
+    <section class="tab" id="tab-ai"></section>
+    <section class="tab" id="tab-errors"></section>
+    <section class="tab" id="tab-standings"></section>
+    <section class="tab" id="tab-manual"></section>
+    <section class="tab" id="tab-sources"></section>
+  </main>
+
+  <footer>
+    <div id="tunnel-box" class="muted">Link pubblico: —</div>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

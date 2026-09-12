@@ -1,0 +1,114 @@
+"""Server web: dashboard + API JSON dello stato."""
+import logging
+import os
+
+from flask import Flask, jsonify, request, send_from_directory
+
+import config
+from app.analysis.assistant import answer
+from app.analysis.llm import ask_ai
+from app.core import kv
+from app.core.store import Store
+
+log = logging.getLogger("web")
+
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+
+def create_app(store: Store, tunnel=None):
+    app = Flask(__name__, static_folder=None)
+
+    @app.get("/")
+    def index():
+        return send_from_directory(STATIC_DIR, "index.html")
+
+    @app.get("/<path:path>")
+    def assets(path):
+        resp = send_from_directory(STATIC_DIR, path)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+    @app.get("/api/state")
+    def api_state():
+        store.load()
+        return jsonify(store.data)
+
+    @app.get("/api/health")
+    def api_health():
+        return jsonify({"ok": True, "updated": store.get("updated", 0)})
+
+    @app.get("/healthz")
+    def healthz():
+        """Health check leggero per Render (keepalive/ping esterno)."""
+        return jsonify({"ok": True, "updated": store.get("updated", 0)})
+
+    @app.get("/api/results")
+    def api_results():
+        """Risultati delle giornate della stagione (superleggero)."""
+        return jsonify({"updated": store.get("updated", 0),
+                        "results": store.get("results", [])})
+
+    @app.get("/api/live")
+    def api_live():
+        """Partite in corso + follow dello stato (leggero, pollato ogni ~10s)."""
+        live = store.get("live")
+        if not live:
+            return jsonify({"updated": 0, "matches": []})
+        return jsonify(live)
+
+    @app.post("/api/odds")
+    def api_add_odds():
+        """Aggiunge una quota manuale (proprio per i mercati giocatore es.
+        'Lautaro Tiro in porta' che i comparatori non coprono)."""
+        payload = request.get_json(silent=True) or {}
+        required = ("home", "away", "market", "pick", "source", "odds")
+        if not all(k in payload for k in required):
+            return jsonify({"error": "servono: home, away, market, pick, source, odds"}), 400
+        entry = {
+            "home": payload["home"], "away": payload["away"],
+            "market": payload["market"], "pick": payload["pick"],
+            "source": payload["source"], "odds": float(payload["odds"]),
+        }
+        try:
+            manual = kv.read_json("manual_odds.json", default=[])
+        except Exception:
+            manual = []
+        if not isinstance(manual, list):
+            manual = []
+        manual.append(entry)
+        kv.write_json("manual_odds.json", manual)
+        log.info("quota manuale aggiunta: %s", entry)
+        return jsonify({"ok": True, "total": len(manual)})
+
+    @app.get("/api/manual-odds")
+    def api_manual_odds():
+        data = kv.read_json("manual_odds.json", default=[])
+        return jsonify(data if isinstance(data, list) else [])
+
+    @app.delete("/api/manual-odds")
+    def api_clear_manual_odds():
+        kv.write_json("manual_odds.json", [])
+        return jsonify({"ok": True})
+
+    @app.post("/api/ask")
+    def api_ask():
+        """Chiede all'assistente AI una raccomandazione basata sui dati."""
+        payload = request.get_json(silent=True) or {}
+        question = (payload.get("question") or "").strip()
+        if not question:
+            return jsonify({"error": "nessuna domanda"}), 400
+        store.load()
+        fixtures = [f for f in store.get("fixtures", [])]
+        standings = store.get("standings", [])
+        result = ask_ai(question, fixtures, standings)
+        if result is None:
+            result = answer(question, fixtures)
+        return jsonify(result)
+
+    @app.get("/api/tunnel")
+    def api_tunnel():
+        if tunnel is None:
+            return jsonify({"available": False, "running": False, "url": None})
+        return jsonify({"available": tunnel.available, **tunnel.status()})
+
+    return app

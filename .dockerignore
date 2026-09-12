@@ -1,0 +1,17 @@
+# dipendenze e dati locali
+__pycache__/
+*.pyc
+*.pyo
+data/
+logs/
+.venv/
+tor/__pycache__/
+
+# dev
+.git/
+.gitignore
+DEVELOPMENT.md
+*.log
+
+# sensibili
+.env

@@ -1,0 +1,229 @@
+"""Monitor risultati live + notifiche Telegram opzionali.
+
+Risultati live (super veloci): un poller dedicato richiede SOLO
+`sport/football/events/live` (una chiamata: tutte le competizioni, filtrate su
+Serie A) ogni LIVE_POLL_SECONDS secondi e scrive uno snapshot minimo in Store
+(`live`), letto dalla dashboard ogni ~10 s via GET /api/live.
+
+Notifiche: solo per le partite "seguite" con /segui <squadra> su Telegram.
+Quando la squadra segna (punteggio cambiato) o la partita finisce, parte un
+messaggio. Gli eventi (marcatore) vengono letti solo al cambio risultato,
+così il polling resta fulmineo.
+"""
+import logging
+import threading
+import time
+
+import requests
+
+import config
+from app.core import kv
+
+log = logging.getLogger("live")
+
+_send_lock = threading.Lock()
+
+
+def _load_follows():
+    """chat_id -> [squadre seguite]."""
+    data = kv.read_json("follows.json")
+    return data if isinstance(data, dict) else {}
+
+
+def _save_follows(data):
+    kv.write_json("follows.json", data)
+
+
+def add_follow(chat_id, teams):
+    follows = _load_follows()
+    key = str(chat_id)
+    cur = follows.setdefault(key, [])
+    added = []
+    for t in teams:
+        if t and t not in cur:
+            cur.append(t)
+            added.append(t)
+    _save_follows(follows)
+    return added
+
+
+def remove_follow(chat_id, teams=None):
+    follows = _load_follows()
+    key = str(chat_id)
+    cur = follows.get(key, [])
+    if teams is None:
+        follows[key] = []
+        removed = cur
+    else:
+        removed = [t for t in teams if t in cur]
+        follows[key] = [t for t in cur if t not in teams]
+    _save_follows(follows)
+    return removed
+
+
+def telegram_send(chat_id, text):
+    if not config.TELEGRAM_BOT_TOKEN:
+        return
+    url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
+    try:
+        with _send_lock:
+            requests.post(url, json={"chat_id": chat_id, "text": text,
+                                     "disable_web_page_preview": True},
+                          timeout=15)
+    except Exception as e:
+        log.warning("notifica a %s fallita: %s", chat_id, e)
+
+
+def notify_team(team, text):
+    """Invia `text` a tutte le chat che seguono `team`."""
+    for chat_id, teams in _load_follows().items():
+        if team in teams:
+            telegram_send(chat_id, text)
+
+
+class LiveMonitor:
+    def __init__(self, store):
+        self.store = store
+        self.client = None
+        self._stop = threading.Event()
+        self._snapshot = {}          # event_id -> dict (stato precedente)
+
+    def start(self):
+        thread = threading.Thread(target=self._loop, daemon=True)
+        thread.start()
+        return self
+
+    def stop(self):
+        self._stop.set()
+
+    # ---------------------------------------------------------- ciclo
+    def _loop(self):
+        log.info("monitor live avviato (ogni %ds)", config.LIVE_POLL_SECONDS)
+        while not self._stop.is_set():
+            t0 = time.time()
+            try:
+                self.tick()
+            except Exception as e:
+                log.exception("monitor live: errore nel ciclo: %s", e)
+            elapsed = time.time() - t0
+            wait = max(5, config.LIVE_POLL_SECONDS - elapsed)
+            self._stop.wait(wait)
+
+    def _get_client(self):
+        if self.client is None:
+            from app.sources import sofascore as sf_mod
+            self.client = sf_mod.SofascoreClient()
+        return self.client
+
+    # ---------------------------------------------------------- tick
+    def tick(self):
+        client = self._get_client()
+        matches = client.live_events()
+        changed = []
+        finished_now = []
+        key = lambda m: m["id"]
+        prev = self._snapshot
+
+        for m in matches:
+            eid = key(m)
+            old = prev.get(eid)
+            if old is None:
+                changed.append(("start", m, None))
+            else:
+                if old.get("hs") != m.get("hs") or old.get("as") != m.get("as"):
+                    changed.append(("goal", m, old))
+                if old.get("status") != "finished" and m.get("status") == "finished":
+                    finished_now.append(m)
+            prev[eid] = m
+
+        # partite che non sono più live (sparite dall'elenco -> finite)
+        for eid in list(prev.keys()):
+            if eid not in matches and self._gone_live(eid):
+                prev.pop(eid)
+
+        self._snapshot = prev
+        self.store.set("live", {
+            "updated": int(time.time()),
+            "matches": sorted(matches, key=lambda m: (m.get("hs") or 0, m.get("as") or 0), reverse=True),
+        })
+
+        if config.TELEGRAM_BOT_TOKEN:
+            self._notify(changed, finished_now)
+
+    def _gone_live(self, event_id):
+        """Un'evento live che sparisce = partita finita (o interrotta).
+
+        Verifichiamo con il dettaglio evento per non dare falsi 'finali'."""
+        try:
+            detail = self._get_client().event_detail(event_id)
+            if not detail:
+                return False
+            return detail.get("status") == "finished"
+        except Exception:
+            return False
+
+    # ------------------------------------------------------- notifiche
+    def _notify(self, changed, finished_now):
+        goals = [(kind, m, old) for kind, m, old in changed if kind == "goal"]
+        starts = [(kind, m, old) for kind, m, old in changed if kind == "start"]
+
+        # marcatori solo al cambio risultato (piccoli: max 1 richiesta/partita)
+        scorers = {}
+        if goals:
+            ids = {m["id"] for _, m, _ in goals}
+            for eid in ids:
+                try:
+                    scorers[eid] = self._goal_incidents(self._get_client(), eid,
+                                                        goals)
+                except Exception as e:
+                    log.debug("incidenti live %s: %s", eid, e)
+                    scorers[eid] = {}
+
+        for _, m, _ in starts:
+            notify_team(m["home"], f"🔴 In diretta! {m['home']} - {m['away']} {_live_score(m)} ({m['period'].lower()})")
+            notify_team(m["away"], f"🔴 In diretta! {m['home']} - {m['away']} {_live_score(m)} ({m['period'].lower()})")
+
+        for m in finished_now:
+            notify_team(m["home"],
+                        f"🏁 FINALE: {m['home']} {m.get('hs')}-{m.get('as')} {m['away']}")
+            notify_team(m["away"],
+                        f"🏁 FINALE: {m['home']} {m.get('hs')}-{m.get('as')} {m['away']}")
+
+        for _, m, _ in goals:
+            s = scorers.get(m["id"], {})
+            scorer = s.get("player") or ""
+            minute = m.get("minute") or s.get("minute") or "?"
+            suffix = f" ({scorer})" if scorer else ""
+            notify_team(m["home"],
+                        f"⚽ GOL! {m['home']} {m.get('hs')}-{m.get('as')} {m['away']} · {minute}'{suffix}")
+            notify_team(m["away"],
+                        f"⚽ GOL! {m['home']} {m.get('hs')}-{m.get('as')} {m['away']} · {minute}'{suffix}")
+
+    def _goal_incidents(self, client, event_id, goals):
+        """Mappa team -> marcatore del gol per l'evento live."""
+        m = next((mm for _, mm, _ in goals if mm["id"] == event_id), None)
+        if not m:
+            return {}
+        before = next((old for _, mm, old in goals if mm["id"] == event_id and old), {})
+        delta_home = (m.get("hs") or 0) - (before.get("hs") or 0)
+        delta_away = (m.get("as") or 0) - (before.get("as") or 0)
+        inc = client.incidents(event_id)
+        out = {}
+        for i in reversed(inc):
+            if i.get("type") != "goal":
+                continue
+            is_home = i.get("team_id") == m["home_id"]
+            is_away = i.get("team_id") == m["away_id"]
+            if is_home and delta_home > 0:
+                out = {"player": i.get("player"), "team": m["home"],
+                       "minute": i.get("minute")}
+                break
+            if is_away and delta_away > 0:
+                out = {"player": i.get("player"), "team": m["away"],
+                       "minute": i.get("minute")}
+                break
+        return out
+
+
+def _live_score(m):
+    return f"{m.get('hs')}-{m.get('as')}"
