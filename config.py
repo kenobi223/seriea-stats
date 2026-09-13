@@ -84,11 +84,37 @@ SAVES_LEAGUE_FLOOR = 2.4                # media parate/gara di riferimento se ma
 SAVES_BET_THRESHOLD = 3.0               # "over 2.5 parate" = almeno 3 parate (boundary)
 SAVES_BET_MIN_PROB = 0.60               # probabilità minima per consigliare l'over
 
+# ---- Gol attesi (xG) come feature del motore Poisson
+# I gol reali in un campione piccolo (inizio stagione) sono rumorosi: gli
+# expected goals di Sofascore (già in cache nelle stats delle partite) sono
+# un segnale molto più stabile di produzione offensiva/difensiva. Ogni
+# squadra è quindi valutata con un blend tra gol fatti/subiti e xG
+# fatti/subiti. XG_BLEND_WEIGHT misura quanto pesa lo xG sul totale.
+XG_ENABLED = os.environ.get("XG_ENABLED", "1") != "0"
+XG_BLEND_WEIGHT = float(os.environ.get("XG_BLEND_WEIGHT", "0.35"))
+
+# ---- Split casa/trasferta per attacco e difesa
+# Le valutazioni di base (attacco/difesa) usano i totali in classifica. Se
+# una squadra gioca in casa le sue ultime score a casa contano più di quelle
+# generali: pesiamo i numeri casalinghi/esterni col peso
+# HOME_AWAY_SPLIT_WEIGHT quando il campione è disponibile.
+HOME_AWAY_SPLIT_WEIGHT = float(os.environ.get("HOME_AWAY_SPLIT_WEIGHT", "0.5"))
+
+# ---- Recency decay nella forma: le ultime 5 partite non pesano tutte uguale
+# (l'ultima importa di più). FORM_RECENCY_DECAY in (0,1): 1 = nessun peso.
+FORM_RECENCY_DECAY = float(os.environ.get("FORM_RECENCY_DECAY", "0.85"))
+
 # Autocritica / apprendimento del modello
 TRACKING_MIN_SAMPLES = 5                # campioni minimi prima di correggere un esito
 MAX_TRACKED = 400                       # pronostici conservati nello storico
 CALIBRATION_CLAMP_LO = 0.55             # correttore minimo applicabile (0.55 = -45%)
 CALIBRATION_CLAMP_HI = 1.45             # correttore massimo applicabile (1.45 = +45%)
+
+# Minimo trascorso dal fischio d'inizio prima di interrogare l'esito di una
+# partita (backstop). La valutazione "a fine partita" immediata (~30s) avviene
+# tramite il monitor live: questa è solo la rete di sicurezza per quando la
+# partita non era in diretta (app spenta / avvio successivo).
+TRACKING_EVAL_DELAY_HOURS = float(os.environ.get("TRACKING_EVAL_DELAY_HOURS", "2.5"))
 
 # Alert "pronto per il 2.5": media mobile degli ultimi N pronostici O/U 2.5
 # valutati (over o under, l'esito suggerito dal modello). Quando la

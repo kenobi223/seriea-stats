@@ -261,6 +261,12 @@ function predictionBlock(fx) {
     html += `<div class="kv" style="margin-top:6px"><span class="muted">Gol attesi:</span>
       <b>${esc(fx.home)} ${lambdas.home_goals} — ${lambdas.away_goals} ${esc(fx.away)}</b></div>`;
   }
+  const xg = p.xg || {};
+  if (xg.enabled) {
+    html += `<div class="kv"><span class="muted">xG (gol attesi reali):</span>
+      <b>${esc(fx.home)} ${Number(xg.home_for).toFixed(2)}↔${Number(xg.home_ag).toFixed(2)}
+       · ${esc(fx.away)} ${Number(xg.away_for).toFixed(2)}↔${Number(xg.away_ag).toFixed(2)}</b></div>`;
+  }
   if (ou["over_2.5"] != null) {
     html += `<div class="kv"><span class="muted">Over/Under 2.5:</span>
       <b>over ${(ou["over_2.5"] * 100).toFixed(0)}% · under ${(ou["under_2.5"] * 100).toFixed(0)}%</b></div>`;
@@ -484,8 +490,18 @@ function renderTracking() {
         <div class="muted">Brier score · più basso = più onesto</div></div>
     </div>`;
 
-  // calibrazione: predetto vs reale a fasce
+  // conteggio per PARTITA (una partita può avere più best-bet/vincere in + mercati)
+  if (t.match_bets_total) {
+    const mRate = t.match_bets_rate != null ? (t.match_bets_rate * 100).toFixed(0) + "%" : "—";
+    const mCls = t.match_bets_rate >= 0.5 ? "v" : "warn";
+    html += `<div class="card" style="margin-top:10px"><div class="kv">
+        <span class="muted" style="min-width:150px">Partite con pronostico vinto</span>
+        <span class="chip ${mCls}">${t.match_bets_hit || 0}/${t.match_bets_total} (${mRate})</span></div>
+      <div class="muted" style="margin-top:6px">Conteggio per partita: azzeccata quando almeno un best-bet è stato centrato (il totale sopra è per singolo pronostico).</div></div>`;
+  }
+
   const bins = t.calibration_bins || [];
+  // calibrazione: predetto vs reale a fasce
   if (bins.some(b => b.count > 0)) {
     html += `<div class="card"><div class="section-title" style="margin-top:0">Calibrazione: che probabilità do vs cosa succede davvero</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">`;

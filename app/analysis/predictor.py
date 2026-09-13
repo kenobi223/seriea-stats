@@ -65,7 +65,7 @@ def _result_pts(entries, for_team=True):
     return pts, count
 
 
-def _team_rating(row, league_avg):
+def _team_rating(row, league_avg, xg=None, league_xg=None):
     """Attacco e difesa per partita dalla classifica, regolarizzati.
 
     A inizio stagione il campione è minuscolo (2-4 giornate): le stime grezze
@@ -73,6 +73,12 @@ def _team_rating(row, league_avg):
     "gioca" anche ``REGULARIZATION_PRIOR`` partite virtuali a livello della
     media del campionato, che tirano i valori verso il centro finché il
     campione reale non cresce (shrinkage bayesiano).
+
+    Se i gol attesi (``xg``) sono disponibili, vengono fusi nella valutazione
+    (``XG_BLEND_WEIGHT``): lo xG è un segnale meno rumoroso dei gol reali su
+    campioni piccoli e rende le lambda del Poisson più stabili. I valori xG
+    vengono prima scalati alla media-gol del campionato (la scala degli xG è
+    ~simile a quella dei gol ma vanno allineati prima di mescolare).
     """
     gf = row.get("gf") or 0
     ga = row.get("ga") or 0
@@ -81,7 +87,76 @@ def _team_rating(row, league_avg):
     p = max(played, 1)
     att = (gf + league_avg["scored"] * prior) / (p + prior)
     deff = (ga + league_avg["conceded"] * prior) / (p + prior)
+
+    if xg and config.XG_ENABLED:
+        xgf = xg.get("xg_for")
+        xga = xg.get("xg_ag")
+        scale_s = (league_avg["scored"] / league_xg["scored"]
+                   if league_xg and league_xg.get("scored") else 1.0)
+        scale_c = (league_avg["conceded"] / league_xg["conceded"]
+                   if league_xg and league_xg.get("conceded") else 1.0)
+        w = config.XG_BLEND_WEIGHT
+        if xgf is not None:
+            att = (1 - w) * att + w * (xgf * scale_s)
+        if xga is not None:
+            deff = (1 - w) * deff + w * (xga * scale_c)
     return att, deff
+
+
+def _split_team_rating(form, side):
+    """Attacco e difesa casa/trasferta della squadra dai risultati a parte.
+
+    ``form`` è la forma della squadra (home_results/away_results). Ritorna
+    (attacco nella condizione ``side``, difesa nella condizione ``side``)
+    oppure (None, None) se il campione manca. ``side`` vale "home"/"away".
+    """
+    rows = form.get(f"{side}_results") or []
+    if not rows:
+        return None, None
+    gf, ga = [], []
+    for r in rows:
+        try:
+            s = r["score"].split("-")
+            if side == "home":
+                gf.append(float(s[0]))
+                ga.append(float(s[1]))
+            else:
+                gf.append(float(s[1]))
+                ga.append(float(s[0]))
+        except (KeyError, ValueError, IndexError):
+            continue
+    if not gf or not ga:
+        return None, None
+    return _mean(gf), _mean(ga)
+
+
+def _blend_split(base, split):
+    """Pesa il valore split (casa/trasferta) contro quello generale."""
+    if split is None:
+        return base
+    return (1 - config.HOME_AWAY_SPLIT_WEIGHT) * base + \
+        config.HOME_AWAY_SPLIT_WEIGHT * split
+
+
+def _wmean(values, decay=None):
+    """Media pesata per recency: i valori più recenti pesano di più.
+
+    ``decay`` in (0,1] è il fattore di decadimento tra una partita e la
+    precedente (il più recente ha peso 1). decay=1 -> media semplice.
+    """
+    vals = [v for v in values if v is not None]
+    if not vals:
+        return 0.0
+    decay = decay if decay is not None else config.FORM_RECENCY_DECAY
+    if decay >= 1:
+        return sum(vals) / len(vals)
+    wsum = 0.0
+    total = 0.0
+    for i, v in enumerate(reversed(vals)):
+        w = decay ** i
+        wsum += v * w
+        total += w
+    return wsum / total if total else 0.0
 
 
 def _points_per_game(row):
@@ -100,12 +175,14 @@ def _home_away_avg(form):
 
 
 def predict_fixture(fx, standings_map, league_avg, calibration=None,
-                    tipster_registry=None):
+                    tipster_registry=None, team_xg=None, league_xg=None):
     """Ritorna dict predictions per il fixture.
 
     Se ``calibration`` (dal tracker) è presente, le probabilità vengono
     corrette in base agli errori storici del modello (più oneste) prima di
-    calcolare quote fair e migliori giocate.
+    calcolare quote fair e migliori giocate. ``team_xg`` è la mappa
+    {team_id: tabella xG} di app/analysis/xg.py e ``league_xg`` le corrisp.
+    medie di campionato (scala xG ~ scala gol, usate per allineare i numeri).
     """
     home_name, away_name = fx.home, fx.away
     probs = {}
@@ -115,19 +192,36 @@ def predict_fixture(fx, standings_map, league_avg, calibration=None,
 
     home_row = standings_map.get(fx.home_id, {})
     away_row = standings_map.get(fx.away_id, {})
-    home_att, home_def = _team_rating(home_row, league_avg)
-    away_att, away_def = _team_rating(away_row, league_avg)
+    home_att, home_def = _team_rating(home_row, league_avg,
+                                      (team_xg or {}).get(fx.home_id),
+                                      league_xg)
+    away_att, away_def = _team_rating(away_row, league_avg,
+                                      (team_xg or {}).get(fx.away_id),
+                                      league_xg)
 
     hf = fx.form_home or {}
     af = fx.form_away or {}
 
-    # gol "sensazione" da forma (ultimi 5)
+    # ---- split casa/trasferta: quando il campione per condizione esiste,
+    #      l'attacco/difesa nella condizione conta di più del dato generale
+    home_h_atk, home_h_def = _split_team_rating(hf, "home")
+    home_a_atk, home_a_def = _split_team_rating(hf, "away")
+    away_h_atk, away_h_def = _split_team_rating(af, "home")
+    away_a_atk, away_a_def = _split_team_rating(af, "away")
+
+    # la squadra di casa attacca/difende come "home", quella ospite come "away"
+    home_att = _blend_split(home_att, home_h_atk)
+    home_def = _blend_split(home_def, home_h_def)
+    away_att = _blend_split(away_att, away_a_atk)
+    away_def = _blend_split(away_def, away_a_def)
+
+    # gol "sensazione" da forma (ultimi 5, ponderata per recency)
     h_last_5 = [e for e in (hf.get("last_results") or [])][-5:]
     a_last_5 = [e for e in (af.get("last_results") or [])][-5:]
-    h_gf5 = _mean([_g(s, 0) for s in h_last_5 if s.get("home")])
-    h_gf5_away = _mean([_g(s, 0) for s in h_last_5 if not s.get("home")])
-    a_gf5 = _mean([_g(s, 1) for s in a_last_5 if not s.get("home")])
-    a_gf5_home = _mean([_g(s, 1) for s in a_last_5 if s.get("home")])
+    h_gf5 = _wmean([_g(s, 0) for s in h_last_5 if s.get("home")])
+    h_gf5_away = _wmean([_g(s, 0) for s in h_last_5 if not s.get("home")])
+    a_gf5 = _wmean([_g(s, 1) for s in a_last_5 if not s.get("home")])
+    a_gf5_home = _wmean([_g(s, 1) for s in a_last_5 if s.get("home")])
 
     # base Poisson semplificato
     h_attack = home_att or league_avg["scored"]
@@ -186,6 +280,19 @@ def predict_fixture(fx, standings_map, league_avg, calibration=None,
         lmbda_h *= config.NEW_MANAGER_DEFENSE_MULT
 
     probs["lambdas"] = {"home_goals": round(lmbda_h, 3), "away_goals": round(lmbda_a, 3)}
+
+    # ---- digest xG per fixture (dashboard / bot / assistente)
+    xg_h = (team_xg or {}).get(fx.home_id) or {}
+    xg_a = (team_xg or {}).get(fx.away_id) or {}
+    probs["xg"] = {
+        "home_for": round(xg_h.get("xg_for") or 0, 2),
+        "home_ag": round(xg_h.get("xg_ag") or 0, 2),
+        "away_for": round(xg_a.get("xg_for") or 0, 2),
+        "away_ag": round(xg_a.get("xg_ag") or 0, 2),
+        "played_home": xg_h.get("played"),
+        "played_away": xg_a.get("played"),
+        "enabled": bool(xg_h and xg_a),
+    }
 
     grid = [[poisson_pmf(lmbda_h, i) * poisson_pmf(lmbda_a, j)
              for j in range(MAX_GOALS)] for i in range(MAX_GOALS)]
@@ -560,6 +667,31 @@ def _motivation(fx, home_row, away_row, hf, af, probs, best):
     if lambdas:
         parts.append(f"Atteso dal modello: {fx.home} {lambdas['home_goals']:g} — "
                      f"{lambdas['away_goals']:g} {fx.away}.")
+
+    xg = probs.get("xg") or {}
+    if xg.get("enabled"):
+        xg_note = []
+        for team_label, form_side, base_key in (
+                (fx.home, hf, "home"), (fx.away, af, "away")):
+            gf_avg = None
+            seg = (form_side.get("current_season") or {})
+            if seg and seg.get("gf") is not None:
+                gf_avg = (seg.get("gf") or 0) / max(seg.get("giocate") or 1, 1)
+            xg_for = xg.get(f"{base_key}_for")
+            xg_ag = xg.get(f"{base_key}_ag")
+            bits = []
+            if xg_for is not None:
+                bits.append(f"xG {xg_for:.2f} a gara")
+            if xg_ag is not None:
+                bits.append(f"ne concede {xg_ag:.2f}")
+            if gf_avg is not None and xg_for and gf_avg - xg_for >= 0.2:
+                bits.append("(sopra i numeri: sta segnando più del dovuto)")
+            elif gf_avg is not None and xg_for and xg_for - gf_avg >= 0.2:
+                bits.append("(sotto i numeri: potrebbe segnare di più)")
+            if bits:
+                xg_note.append(f"{team_label}: {', '.join(bits)}")
+        if xg_note:
+            parts.append("Gol attesi: " + "; ".join(xg_note) + ".")
 
     es = probs.get("exact_score") or []
     if es:

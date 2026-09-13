@@ -444,11 +444,29 @@ def run_cycle(store, quick=False):
     #      precedenti al singolo fixture (nessuna fuga di dati avanti).
     league_avg = _league_avg(standings, [f.form_home for f in now_fx] + [f.form_away for f in now_fx])
     standings_map = {r["team_id"]: r for r in standings}
+
+    # ---- gol attesi (xG): media a squadra dagli expected_goals già nelle
+    #      stats in cache (praticamente gratuita dopo il primo ciclo). Serve
+    #      a rendere le valutazioni attacco/difesa più stabili (i gol reali
+    #      su pochi campioni sono rumorosi).
+    team_xg, league_xg = {}, None
+    if config.XG_ENABLED:
+        try:
+            from app.analysis import xg as xg_mod
+            team_ids = sorted({fx.home_id for fx in now_fx} |
+                              {fx.away_id for fx in now_fx})
+            team_xg = xg_mod.compute_all(client, team_ids, season_id)
+            league_xg = xg_mod.league_xg(team_xg)
+            store.set("team_xg", team_xg)
+        except Exception as e:
+            log.debug("xg non disponibile: %s", e)
+
     for fx in now_fx:
         calib_fx = tracker.calibration_for(fx.round, fx.start_ts)
         fx.predictions = predictor.predict_fixture(
             fx, standings_map, league_avg, calib_fx,
-            tipster_registry=tipster_registry)
+            tipster_registry=tipster_registry,
+            team_xg=team_xg, league_xg=league_xg)
 
     # ---- salva i pronostici appena emessi (per confronto futuro)
     try:

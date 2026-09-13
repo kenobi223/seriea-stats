@@ -151,6 +151,24 @@ def _tiri_in_porta(fixtures, only="probabili"):
     return items
 
 
+def _xg_compare(fixtures, limit=10):
+    items = []
+    for fx in fixtures:
+        p = fx.get("predictions") or {}
+        x = p.get("xg") or {}
+        if not x.get("enabled"):
+            continue
+        items.append({
+            "title": f"{fx.get('home')} - {fx.get('away')}",
+            "text": (f"xG: {fx.get('home')} {x['home_for']:.2f} prodotti / "
+                     f"{x['home_ag']:.2f} concessi · {fx.get('away')} "
+                     f"{x['away_for']:.2f} prodotti / {x['away_ag']:.2f} concessi "
+                     f"(campione {x.get('played_home')}/{x.get('played_away')} partite)"),
+            "tag": "info",
+        })
+    return items
+
+
 def _partita(fixture):
     p = fixture.get("predictions") or {}
     lines = []
@@ -201,6 +219,12 @@ def answer(raw_question, fixtures):
         items = _pronostici(fixtures)
         intro = "I pronostici con valore migliore secondo il modello:"
         intent = "pronostici"
+
+    elif any(k in q for k in ("xg", "gol attesi", "expected", "attesi")):
+        items = _xg_compare(fixtures)
+        intro = ("Gol attesi (xG) per le prossime partite: cosa producono e subiscono "
+                 "le squadre dagli expected goals delle partite in stagione:")
+        intent = "xg"
 
     elif any(k in q for k in ("marcator", "goleador", "chi segna",
                               "probabilità gol", "andare a segno", "a segno")):

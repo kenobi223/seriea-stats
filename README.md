@@ -37,6 +37,11 @@ Dashboard web + motore di analisi per le partite di **Serie A**:
   movimenti di linea tra i refresh, possibili arbitraggi
 - **pronostico per ogni partita** con probabilità modello (Poisson), gol attesi e
   motivazione in italiano
+- **xG (gol attesi) nel motore**: attacco/difesa valutati come blend tra gol reali
+  e **expected goals** di Sofascore (già nella cache, zero richieste extra), con
+  **split casa/trasferta** e **forma ponderata per recency** → λ del Poisson più
+  stabili, narrativa xG in motivazione, dashboard, bot (📐) e assistente AI (domanda
+  "parlami degli xg" o "gol attesi")
 - **autocritica e apprendimento**: ogni pronostico viene salvato, confrontato con
   il risultato reale a fine partita, e il modello corregge da solo le proprie
   probabilità in base agli errori (tab **Onestà del modello** + bot `/tracking`):
@@ -173,6 +178,11 @@ numeri diventano il confronto onesto.
 - `TRACKING_MIN_SAMPLES = 5` → campioni minimi prima che il modello si corregga su un esito
 - `CALIBRATION_CLAMP_LO / _HI = 0.55 / 1.45` → limite correttore appreso su una probabilità
 - `MAX_TRACKED = 400` → pronostici conservati nello storico per l'autocritica
+- `TRACKING_EVAL_DELAY_HOURS = 2.5` → attesa minima dal fischio d'inizio prima di chiedere
+  l'esito di una partita (rete di sicurezza). La valutazione vera e propria avviene **subito
+  a fine partita**: il monitor live (~30s) conferma il "finished" e aggiorna subito l'
+  onestà del modello (tracking + calibrazione) nella dashboard e nel bot, senza aspettare
+  il prossimo ciclo dello scheduler
 
 ## Struttura
 

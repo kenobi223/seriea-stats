@@ -139,6 +139,9 @@ class LiveMonitor:
         # partite che non sono più live (sparite dall'elenco -> finite)
         for eid in list(prev.keys()):
             if eid not in matches and self._gone_live(eid):
+                gone = prev[eid]
+                if gone.get("status") != "finished":
+                    finished_now.append(gone)
                 prev.pop(eid)
 
         self._snapshot = prev
@@ -147,8 +150,36 @@ class LiveMonitor:
             "matches": sorted(matches, key=lambda m: (m.get("hs") or 0, m.get("as") or 0), reverse=True),
         })
 
+        # partite finite adesso: valuta subito il pronostico e aggiorna
+        # l'["onestà del modello"], invece di aspettare il prossimo ciclo
+        if finished_now:
+            self._eval_finished([m["id"] for m in finished_now])
+
         if config.TELEGRAM_BOT_TOKEN:
             self._notify(changed, finished_now)
+
+    def _eval_finished(self, event_ids):
+        """Ricalcola l'autocritica appena una partita in diretta finisce.
+
+        Il monitor live vede il "finished" in ~30s dal fischio finale: invece
+        di lasciare il pronostico non valutato fino al prossimo ciclo dello
+        scheduler (~2.5h dopo l'inizio), lo valuta subito e pubblica tracking
+        + calibrazione, così dashboard e bot mostrano l'onestà aggiornata.
+        """
+        try:
+            from app.analysis import tracker
+            client = self._get_client()
+            changed = tracker.evaluate(client, force_ids=event_ids)
+            if not changed:
+                return
+            tracking, calibration = tracker.analyze()
+            self.store.set("tracking", tracking)
+            self.store.set("calibration", calibration)
+            self.store.save()
+            log.info("tracker: onestà aggiornata a fine partita (%d nuovi)",
+                     changed)
+        except Exception as e:
+            log.debug("tracker live update fallito: %s", e)
 
     def _gone_live(self, event_id):
         """Un'evento live che sparisce = partita finita (o interrotta).

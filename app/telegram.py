@@ -130,6 +130,13 @@ def _giornata_text(tr, fixtures):
         es = (p.get("exact_score") or [])
         if es:
             line += (f"\n   {tr._t('pronostico_exact', score=es[0]['score'], pct=es[0]['prob'] * 100)}")
+        xg = p.get("xg") or {}
+        if xg.get("enabled"):
+            line += "\n   " + tr._t(
+                "pronostico_xg", home=fx.get("home"),
+                hf=xg.get("home_for"), ha=xg.get("home_ag"),
+                away=fx.get("away"), af=xg.get("away_for"),
+                aa=xg.get("away_ag"))
         ks = fx.get("keeper_saves") or {}
         for side in ("home", "away"):
             b = ks.get(side)
@@ -288,6 +295,11 @@ def _tracking_text(tr, tracking):
         lines.append(tr._t("tracking_evaluated", n=tracking["evaluated"]))
         lines.append(tr._t("tracking_hit", hit=tracking["bets_hit"],
                            tot=tracking["bets_total"], pct=rate * 100))
+        if tracking.get("match_bets_total"):
+            lines.append(tr._t("tracking_match_hit",
+                               hit=tracking["match_bets_hit"],
+                               tot=tracking["match_bets_total"],
+                               pct=tracking["match_bets_rate"] * 100))
         for m, st in sorted((tracking.get("by_market") or {}).items()):
             if st.get("bets_total"):
                 lines.append(f"· {_market_label(tr, m)}: "

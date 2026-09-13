@@ -68,6 +68,7 @@ T = {
         "tracking_empty": "Nessun pronostico ancora valutato: partirà con i prossimi risultati.",
         "tracking_evaluated": "Partite valutate: {n}",
         "tracking_hit": "Indovinati: {hit}/{tot} ({pct:.0f}%)",
+        "tracking_match_hit": "Partite con pronostico vinto: {hit}/{tot} ({pct:.0f}%)",
         "tracking_brier": "Brier score: {b:.3f} (più basso = più onesto)",
         "tracking_rps": "RPS 1X2: {r:.4f} (più basso = più onesto)",
         "tracking_oos": "Fuori campione (solo round precedenti): Brier {b:.3f} → {bc:.3f} ({imp:+.3f})",
@@ -82,6 +83,7 @@ T = {
         "pronostico_exact": "Risultato esatto più probabile: {score} ({pct:.0f}%)",
         "pronostico_saves": "🧤 {gk} ({team}): ~{exp} parate · Over {thr:g} @{fair} ({pct:.0f}%)",
         "pronostico_tipster": "🔁 Voce esterna {src} (affid. {rate}): 1X2 {o} · O/U {g} · {s}",
+        "pronostico_xg": "xG reali: {home} {hf}↔{ha} · {away} {af}↔{aa}",
         "don_title": ("⭐ Sostieni Serie A Stats\n\n"
                       "Scegli un importo in Telegram Stars.\n"
                       "Ogni stella aiuta a mantenere il bot sempre attivo. Grazie!"),

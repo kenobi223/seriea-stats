@@ -19,11 +19,26 @@ gioco per non appesantire ``state.json``.
 """
 import logging
 import random
+import threading
 
 import config
 from app.core import kv
 
 log = logging.getLogger("tracker")
+
+# serializza le operazioni load-modifica-save (record/evaluate/analyze/walk_forward):
+# lo scheduler e il monitor live girano in thread separati e possono valutare
+# partite finite contemporaneamente senza perdere aggiornamenti.
+_lock = threading.RLock()
+
+
+def _sync(fn):
+    """Avvolge una funzione che modifica la memoria dello storico col lock."""
+    def wrapped(*args, **kwargs):
+        with _lock:
+            return fn(*args, **kwargs)
+    return wrapped
+
 
 MIN_SAMPLES = config.TRACKING_MIN_SAMPLES
 MAX_RECORDS = config.MAX_TRACKED
@@ -180,6 +195,7 @@ def _fx_fields(fx):
             fx.get("round"), (fx.get("predictions") or {}))
 
 
+@_sync
 def record(fixtures):
     """Salva i pronostici correnti (non ancora giocati) nello storico.
 
@@ -253,16 +269,25 @@ def record(fixtures):
 
 
 # --------------------------------------------------------------- evaluate
-def evaluate(client):
-    """Controlla le partite non ancora valutate e scrive l'esito reale."""
+@_sync
+def evaluate(client, force_ids=None):
+    """Controlla le partite non ancora valutate e scrive l'esito reale.
+
+    ``force_ids`` (lista di fixture id) fa valutare subito quelle partite già
+    confermate "finished" dal monitor live, saltando l'attesa di sicurezza.
+    """
     data = load()
     changed = 0
     now = __import__("time").time()
+    delay = config.TRACKING_EVAL_DELAY_HOURS * 3600
+    force = set(force_ids or ())
     for r in data["records"]:
         if r.get("evaluated") or not r.get("id"):
             continue
-        # la partita può essere finita solo ~3h dopo il fischio d'inizio
-        if (r.get("start_ts") or 0) > 0 and now - r["start_ts"] < 3 * 3600:
+        # la partita può essere finita solo ~2.5h dopo il fischio d'inizio
+        # (a meno che il live non l'abbia già confermata finita)
+        if (r.get("start_ts") or 0) > 0 and now - r["start_ts"] < delay \
+                and r["id"] not in force:
             continue
         try:
             detail = client.event_detail(r["id"])
@@ -279,6 +304,7 @@ def evaluate(client):
                        **{m: _outcome(hs, as_)[m] for m in MARKETS}}
         r["saves_result"] = _saves_outcome(r, client)
         r["evaluated"] = True
+        r["evaluated_at"] = int(now)
         changed += 1
         log.info("tracker: %s %s-%s %s valutato (%s-%s)",
                  r.get("home"), r.get("away"), r.get("round"), r.get("id"),
@@ -322,6 +348,7 @@ def pending_wins():
     return out
 
 
+@_sync
 def mark_wins_notified(ids):
     """Segna come notificati i pronostici vincenti (evita doppie foto)."""
     ids = set(ids or ())
@@ -426,6 +453,7 @@ def calibration_for(round_num, start_ts=None):
     return calibration
 
 
+@_sync
 def walk_forward():
     """Backtest fuori campione (walk-forward) del processo di calibrazione.
 
@@ -540,6 +568,7 @@ def _oos_bet_stats(records):
     return stats
 
 
+@_sync
 def analyze():
     """Statistiche di centratura + correttori di calibrazione.
 
@@ -576,6 +605,24 @@ def analyze():
                            if st["bets_total"] else None)
     tracking["by_market"] = by_market
 
+    # ---- quante PARTITE hanno visto andare a segno un best-bet (conteggio
+    #      per partita: azzeccata se almeno uno dei best-bet era centrato).
+    #      affianca il conteggio per pronostico (bets_total), più intuitivo
+    #      quando una partita aveva più best-bet.
+    match_bets_total = match_bets_hit = 0
+    for r in records:
+        res = r["result"]
+        bets = [b for b in r.get("bets", []) if b.get("market") in res]
+        if not bets:
+            continue
+        match_bets_total += 1
+        if any(b.get("pick") == res[b.get("market")] for b in bets):
+            match_bets_hit += 1
+    tracking["match_bets_total"] = match_bets_total
+    tracking["match_bets_hit"] = match_bets_hit
+    tracking["match_bets_rate"] = (match_bets_hit / match_bets_total
+                                   if match_bets_total else None)
+
     # ---- centratura dei pick del MODELLO (il pronostico che emettiamo per
     #      ogni mercato, indipendente dalla quota/valore)
     picks_total = picks_hit = 0
@@ -599,6 +646,21 @@ def analyze():
         st["picks_rate"] = (st["picks_hit"] / st["picks_total"]
                             if st["picks_total"] else None)
     tracking["picks_by_market"] = picks_by_market
+
+    # ---- partite in cui il pick del modello (1x2/over/BTTS) è centrato
+    match_picks_total = match_picks_hit = 0
+    for r in records:
+        res = r["result"]
+        pks = [pi for pi in r.get("picks", []) if pi.get("market") in res]
+        if not pks:
+            continue
+        match_picks_total += 1
+        if any(pi.get("pick") == res[pi.get("market")] for pi in pks):
+            match_picks_hit += 1
+    tracking["match_picks_total"] = match_picks_total
+    tracking["match_picks_hit"] = match_picks_hit
+    tracking["match_picks_rate"] = (match_picks_hit / match_picks_total
+                                    if match_picks_total else None)
 
     # ---- centratura dei pronostici sulle parate dei portieri
     saves_total = saves_hit = 0
