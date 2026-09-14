@@ -111,4 +111,25 @@ def create_app(store: Store, tunnel=None):
             return jsonify({"available": False, "running": False, "url": None})
         return jsonify({"available": tunnel.available, **tunnel.status()})
 
+    @app.get("/api/net-test")
+    def api_net_test():
+        """Test diretto (no Tor) dei host dati: utile per saggiare quale
+        fonte risponde davvero dal datacenter Render."""
+        import time as _time
+        import requests as _requests
+        hosts = {
+            "espn_core":  "https://sports.core.api.espn.com/v2/sports/soccer/leagues/ita.1",
+            "espn_web":   "https://site.web.api.espn.com/apis/v2/sports/soccer/ita.1/standings",
+            "sofascore":  "https://www.sofascore.com/api/v1/sport/football/events/live",
+        }
+        out = {}
+        for name, url in hosts.items():
+            t = _time.time()
+            try:
+                r = _requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+                out[name] = {"status": r.status_code, "ms": round((_time.time() - t) * 1000)}
+            except Exception as e:
+                out[name] = {"status": "ERR", "ms": round((_time.time() - t) * 1000), "err": str(e)[:80]}
+        return jsonify(out)
+
     return app
