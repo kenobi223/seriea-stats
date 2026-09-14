@@ -85,6 +85,8 @@ def main():
 
     store = Store()
     store.load()
+    store.set("code", "espn-2026-form")
+    store.save()
 
     if args.once:
         run_cycle(store, quick=False)
