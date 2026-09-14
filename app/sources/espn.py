@@ -1,7 +1,12 @@
 """Fonte dati ESPN (API pubblica, senza chiave).
 
 Covers: stagione, classifica, risultati, prossime partite, partite live,
-quote 1X2 (moneyline DraftKings, se presenti nei dati scoreboard).
+quote 1X2 (Bet365, se presenti nei dati core API).
+
+Usa due domini ESPN:
+- sports.core.api.espn.com  -> eventi, quote, live, risultati (risponde anche
+  da IP datacenter/exit perche' e' l'API delle app ESPN)
+- site.web.api.espn.com     -> classifica (host bloccato? no, funziona)
 """
 import logging
 import time
@@ -13,9 +18,8 @@ from app.core.models import Fixture, OddsPick
 
 log = logging.getLogger("espn")
 
-_SB = "https://site.api.espn.com/apis/site/v2/sports/soccer/ita.1"
+_CORE = "https://sports.core.api.espn.com/v2/sports/soccer/leagues/ita.1"
 _WEB = "https://site.web.api.espn.com/apis/v2/sports/soccer/ita.1"
-_WINDOW_DAYS = 14  # limite del range di date di scoreboard
 
 
 def _epoch(iso):
@@ -25,53 +29,40 @@ def _epoch(iso):
         return 0
 
 
-def _american_to_decimal(odd_str):
-    """Converte quote americane ('-475', '+800') in decimali (1.21, 9.0)."""
-    try:
-        v = int(str(odd_str).strip().replace("+", ""))
-    except (ValueError, AttributeError):
-        return None
-    if v > 0:
-        return round(1 + v / 100, 3)
-    return round(1 + 100 / abs(v), 3)
-
-
 def _date(days=0):
     return (datetime.now(timezone.utc) + timedelta(days=days)).strftime("%Y%m%d")
 
 
-def _chunks(start_days, end_days):
-    for d0 in range(start_days, end_days, _WINDOW_DAYS):
-        yield _date(d0), _date(min(d0 + _WINDOW_DAYS - 1, end_days))
-
-
-def _status_name(state):
-    s = state or ""
-    if "FULL_TIME" in s or s in ("post", "postp"):
+def _status_name(state, description=""):
+    s = (state or "").upper()
+    if "FULL" in s or "FINAL" in s or s == "POST":
         return "finished"
-    if state in ("in", "pre") and "PRE" in s:
-        return "notstarted"
-    if s in ("in", "pre") or "IN_PROGRESS" in s or "PAUSED" in s or "HALFTIME" in s:
-        return "inprogress" if s != "pre" else "notstarted"
-    if "SCHEDULED" in s or "PRE" in s:
-        return "notstarted"
+    if "LIVE" in s or "IN_PROGRESS" in s or "HALFTIME" in s or s == "IN":
+        return "inprogress"
     if "POSTPONED" in s:
         return "postponed"
-    if "CANCELLED" in s:
+    if "CANCEL" in s:
         return "cancelled"
     return "notstarted"
 
 
 class EspnClient:
     def __init__(self):
-        self.http = HTTPClient(base=_SB, tor_mode="never", delay=0.3)
+        self.http = HTTPClient(base=_CORE, tor_mode="never", delay=0.3)
         self.web = HTTPClient(base=_WEB, tor_mode="never", delay=0.3)
         self._results_cache = (0.0, [])
-        self._events_by_id = {}  # cache eventi per id (quote incluse)
+        self._teams_cache = {}  # team_id -> displayName
+        self._events_by_id = {}  # event_id -> dict(comp, odds_1x2)
 
     # ------------------------------------------------------------- stagione
     def resolve_season(self):
         return {"id": "ita.1", "name": "Serie A", "source": "espn"}
+
+    def _team_name(self, team_id):
+        if team_id not in self._teams_cache:
+            data = self.http.get(f"/seasons/2026/teams/{team_id}")
+            self._teams_cache[team_id] = (data or {}).get("displayName") or str(team_id)
+        return self._teams_cache[team_id]
 
     def standings(self, season_id=None):
         data = self.web.get("/standings")
@@ -99,134 +90,179 @@ class EspnClient:
         return rows
 
     # ------------------------------------------------------------- eventi
-    def _events(self, start_days, end_days, limit=100):
+    def _events(self, start_days, end_days, limit=100, with_odds=True):
+        """Eventi in un range di giorni, via core.api (ref navigation)."""
         out = []
-        for d0, d1 in _chunks(start_days, end_days):
-            data = self.http.get(
-                "/scoreboard", params={"dates": f"{d0}-{d1}", "limit": limit})
-            if not data:
+        d0, d1 = _date(start_days), _date(end_days)
+        data = self.http.get("/events", params={
+            "limit": limit, "dates": f"{d0}-{d1}"})
+        if not data:
+            return out
+        for item in data.get("items", []) or []:
+            ref = (item.get("$ref") or item.get("ref") or "")
+            event_id = ref.rstrip("?lang=en&region=us").split("/events/")[-1]
+            if not event_id or event_id.startswith("seasons"):
                 continue
-            for e in data.get("events", []) or []:
-                comp = (e.get("competitions") or [{}])[0]
-                if not comp.get("competitors"):
-                    continue
+            comp = self._competition(event_id, with_odds=with_odds)
+            if comp:
                 out.append(comp)
-                self._events_by_id[comp.get("id")] = comp
+                self._events_by_id[event_id] = comp
         return out
 
-    def odds_to_picks(self, event_id, source="espn"):
-        """Moneyline DraftKings -> OddsPick (market 'Full time', picks 1/X/2)."""
-        comp = self._events_by_id.get(event_id)
-        if not comp:
-            return []
-        odds_list = comp.get("odds") or []
-        if not odds_list:
-            return []
-        odds_obj = odds_list[0] or {}
-        ml = odds_obj.get("moneyline") or {}
-        picks = []
-        for key, pick_label in [("home", "1"), ("draw", "X"), ("away", "2")]:
-            side = ml.get(key) or {}
-            dec = _american_to_decimal(side.get("close", {}).get("odds")
-                                       or side.get("open", {}).get("odds"))
-            if dec is None:
+    def _competition(self, event_id, with_odds=True):
+        data = self.http.get(f"/events/{event_id}/competitions/{event_id}")
+        if not data:
+            return None
+        comp = {"id": event_id,
+                "date": data.get("date"),
+                "status": self._status(event_id),
+                "venue": (data.get("venue") or {}).get("fullName"),
+                "competitors": data.get("competitors") or []}
+        # punteggi via ref
+        for c in comp["competitors"]:
+            cid = c.get("id")
+            c["score"] = self._score(event_id, cid) or 0
+        # quote 1X2 Bet365
+        comp["odds_raw"] = self._odds_items(event_id) if with_odds else []
+        comp["odds"] = self._picks_from_odds(comp["odds_raw"])
+        return comp
+
+    def _status(self, event_id):
+        data = self.http.get(
+            f"/events/{event_id}/competitions/{event_id}/status")
+        return (data or {}).get("type") or {}
+
+    def _score(self, event_id, comp_id):
+        data = self.http.get(
+            f"/events/{event_id}/competitions/{event_id}/competitors/{comp_id}/score")
+        return (data or {}).get("value")
+
+    def _odds_items(self, event_id):
+        data = self.http.get(
+            f"/events/{event_id}/competitions/{event_id}/odds?limit=50")
+        return (data or {}).get("items") or []
+
+    @staticmethod
+    def _picks_from_odds(items):
+        for item in items:
+            if (item.get("provider") or {}).get("name") != "Bet 365":
                 continue
-            picks.append(OddsPick(source=source, market="Full time",
-                                  pick=pick_label, odds=dec))
-        return picks
+            home = (item.get("homeTeamOdds") or {}).get("odds", {}).get("value")
+            draw = (item.get("drawOdds") or {}).get("value")
+            away = (item.get("awayTeamOdds") or {}).get("odds", {}).get("value")
+            picks = []
+            for value, pick in [(home, "1"), (draw, "X"), (away, "2")]:
+                try:
+                    dec = float(value)
+                except (TypeError, ValueError):
+                    continue
+                picks.append(OddsPick(source="espn", market="Full time",
+                                      pick=pick, odds=round(dec, 2)))
+            return picks
+        return []
+
+    def odds_to_picks(self, event_id, source="espn"):
+        comp = self._events_by_id.get(event_id) or {}
+        picks = comp.get("odds")
+        if picks:
+            return picks
+        return self._picks_from_odds(comp.get("odds_raw") or [])
+
+    def _teams(self, comp):
+        home, away = comp.get("competitors") or []
+        if not home or not away:
+            return None, None
+        by = {c.get("homeAway"): c for c in (home, away)}
+        ht, at = by.get("home") or {}, by.get("away") or {}
+        return ht, at
+
+    def _row(self, comp, ts=None):
+        ht, at = self._teams(comp)
+        if not ht or not at:
+            return None
+        hid, aid = ht.get("id"), at.get("id")
+        return (comp.get("id"), self._team_name(hid), self._team_name(aid),
+                hid, aid, ts if ts is not None else _epoch(comp.get("date")), None)
 
     def next_fixtures(self, season_id, days=10):
         rows = []
         now = time.time()
         for comp in self._events(0, days):
-            ts = _epoch(comp.get("date") or comp.get("startDate"))
+            ts = _epoch(comp.get("date"))
             if ts < now - 3600 or ts > now + days * 86400:
                 continue
-            home, away = comp.get("competitors") or []
-            if not home or not away:
-                continue
-            rows.append(self._row(comp, ts))
+            row = self._row(comp, ts)
+            if row:
+                rows.append(row)
         rows.sort(key=lambda x: x[5])
         return rows
-
-    def _row(self, comp, ts):
-        home, away = comp.get("competitors") or []
-        by = {c.get("homeAway"): (c.get("team") or {}) for c in (home, away)}
-        ht, at = by.get("home") or {}, by.get("away") or {}
-        return (comp.get("id"), ht.get("displayName"), at.get("displayName"),
-                ht.get("id"), at.get("id"), ts, None)
 
     def season_results(self, season_id, max_rounds=99):
         now = time.time()
         if now - self._results_cache[0] < 600:
             return self._results_cache[1]
-        by_round = {}
-        for comp in self._events(-180, 0, limit=70):
-            st = self._status_name((comp.get("status") or {}).get("type", {}).get("name"))
+        matches = []
+        for comp in self._events(-14, 0, with_odds=False):
+            st = _status_name((comp.get("status") or {}).get("name"))
             if st != "finished":
                 continue
-            home, away = comp.get("competitors") or []
-            if not home or not away:
+            ht, at = self._teams(comp)
+            if not ht or not at:
                 continue
-            hs = (home or {}).get("score")
-            as_ = (away or {}).get("score")
+            hs, as_ = ht.get("score"), at.get("score")
             if hs is None or as_ is None:
                 continue
-            by_round.setdefault(None, []).append({
+            matches.append({
                 "id": comp.get("id"),
-                "home": (home.get("team") or {}).get("displayName"),
-                "away": (away.get("team") or {}).get("displayName"),
-                "home_id": (home.get("team") or {}).get("id"),
-                "away_id": (away.get("team") or {}).get("id"),
-                "score": f"{hs}-{as_}", "hs": hs, "as": as_,
-                "start_ts": _epoch(comp.get("date") or comp.get("startDate")),
+                "home": self._team_name(ht.get("id")),
+                "away": self._team_name(at.get("id")),
+                "home_id": ht.get("id"), "away_id": at.get("id"),
+                "score": f"{int(hs)}-{int(as_)}", "hs": int(hs), "as": int(as_),
+                "start_ts": _epoch(comp.get("date")),
             })
-        rounds = [{"round": r, "matches": ms}
-                  for r, ms in sorted(by_round.items(), key=lambda kv: (kv[0] or 0))]
+        rounds = [{"round": None, "matches": matches}]
         self._results_cache = (now, rounds)
         return rounds
 
     def event_detail(self, event_id):
-        data = self.http.get("/summary", params={"event": event_id})
-        if not data:
+        comp = self._events_by_id.get(event_id) or self._competition(event_id)
+        if not comp:
             return None
-        comp = ((data.get("header", {}) or {}).get("competitions") or [{}])[0]
-        home, away = comp.get("competitors") or []
-        if not home or not away:
+        ht, at = self._teams(comp)
+        if not ht or not at:
             return None
-        s = (comp.get("status") or {}).get("type", {}) or {}
+        s = comp.get("status") or {}
         return {
             "id": comp.get("id"),
-            "home": (home.get("team") or {}).get("displayName"),
-            "away": (away.get("team") or {}).get("displayName"),
-            "home_id": (home.get("team") or {}).get("id"),
-            "away_id": (away.get("team") or {}).get("id"),
-            "start_ts": _epoch(comp.get("date") or comp.get("startDate")),
+            "home": self._team_name(ht.get("id")),
+            "away": self._team_name(at.get("id")),
+            "home_id": ht.get("id"), "away_id": at.get("id"),
+            "start_ts": _epoch(comp.get("date")),
             "round": None,
-            "venue": (comp.get("venue") or {}).get("fullName") or "",
-            "status": self._status_name(s.get("name")),
-            "home_score": comp.get("competitors", [{}])[0].get("score"),
-            "away_score": comp.get("competitors", [{}])[1].get("score"),
+            "venue": comp.get("venue") or "",
+            "status": _status_name(s.get("name")),
+            "home_score": ht.get("score"),
+            "away_score": at.get("score"),
             "referee": {},
         }
 
     def live_events(self):
         out = []
         for comp in self._events(0, 0):
-            home, away = comp.get("competitors") or []
-            if not home or not away:
+            st = _status_name((comp.get("status") or {}).get("name"))
+            if st != "inprogress":
                 continue
-            status = (comp.get("status") or {}).get("type", {}) or {}
-            period = status.get("detail") or status.get("name") or ""
+            ht, at = self._teams(comp)
+            if not ht or not at:
+                continue
             out.append({
                 "id": comp.get("id"),
-                "home": (home.get("team") or {}).get("displayName"),
-                "away": (away.get("team") or {}).get("displayName"),
-                "home_id": (home.get("team") or {}).get("id"),
-                "away_id": (away.get("team") or {}).get("id"),
-                "hs": home.get("score"), "as": away.get("score"),
-                "status": self._status_name(status.get("name")),
-                "period": period,
+                "home": self._team_name(ht.get("id")),
+                "away": self._team_name(at.get("id")),
+                "home_id": ht.get("id"), "away_id": at.get("id"),
+                "hs": ht.get("score"), "as": at.get("score"),
+                "status": st,
+                "period": (comp.get("status") or {}).get("shortDetail") or st,
                 "minute": None,
             })
         return out

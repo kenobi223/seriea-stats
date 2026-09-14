@@ -175,7 +175,7 @@ SOFASCORE_BASE = "https://www.sofascore.com/api/v1"
 # ------------------------------------------------------------------- fonti dati
 # Ordine del fallback a catena (virgole separate). Capacità per fonte:
 #   sofascore : tutto (quote 1X2, h2h, lineups, statistiche, incidenti…)
-#   espn      : stagione, classifica, risultati, partite, live, quote 1X2 (DraftKings)
+#   espn      : stagione, classifica, risultati, partite, live, quote 1X2 (Bet365)
 DATA_SOURCE_ORDER = [s.strip() for s in os.environ.get(
     "DATA_SOURCE_ORDER", "sofascore,espn").split(",") if s.strip()]
 
