@@ -123,6 +123,24 @@ def create_app(store: Store, tunnel=None):
         return jsonify({"added": added, "replaced": replaced,
                         "total": len(data["records"])})
 
+    @app.post("/api/tracking-renotify")
+    def api_tracking_renotify():
+        """Retest notifiche: azzera win_notified e reinvia subito la foto."""
+        from app.analysis import tracker
+        from app import notify
+        data = tracker.load()
+        now = __import__("time").time()
+        n = 0
+        for r in data["records"]:
+            if r.get("win_notified") and r.get("evaluated"):
+                r["win_notified"] = False
+                n += 1
+        tracker.save(data)
+        pending = tracker.pending_wins()
+        if pending:
+            notify.send_pending_wins()
+        return jsonify({"reset": n, "pending": len(pending)})
+
     @app.get("/api/live")
     def api_live():
         """Partite in corso + follow dello stato (leggero, pollato ogni ~10s)."""
