@@ -48,6 +48,36 @@ def create_app(store: Store, tunnel=None):
         return jsonify({"updated": store.get("updated", 0),
                         "results": store.get("results", [])})
 
+    @app.get("/api/tracking-records")
+    def api_tracking_records():
+        """Record valutati dal tracker: pick/best-bet vs esito reale (debug)."""
+        from app.analysis import tracker
+        data = tracker.load()
+        out = []
+        for r in data["records"]:
+            if not r.get("evaluated"):
+                continue
+            res = r.get("result") or {}
+            hits = []
+            for b in r.get("bets", []):
+                mkt, pick = b.get("market"), b.get("pick")
+                hit = pick == res.get(mkt)
+                hits.append({"market": mkt, "pick": pick, "odds": b.get("odds"),
+                             "prob": b.get("prob"), "hit": hit})
+            for pi in r.get("picks", []):
+                mkt, pick = pi.get("market"), pi.get("pick")
+                hit = pick == res.get(mkt)
+                hits.append({"market": mkt, "pick": pick, "odds": pi.get("odds"),
+                             "prob": pi.get("prob"), "hit": hit, "model": True})
+            out.append({
+                "id": r.get("id"), "home": r.get("home"), "away": r.get("away"),
+                "round": r.get("round"), "start_ts": r.get("start_ts"),
+                "score": f"{res.get('home_score')}-{res.get('away_score')}",
+                "result": res.get("1x2"), "hits": hits})
+        out.sort(key=lambda x: -(x.get("start_ts") or 0))
+        return jsonify({"tracked": len(data["records"]),
+                        "evaluated": len(out), "records": out})
+
     @app.get("/api/live")
     def api_live():
         """Partite in corso + follow dello stato (leggero, pollato ogni ~10s)."""
