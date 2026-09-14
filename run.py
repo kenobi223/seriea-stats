@@ -85,7 +85,7 @@ def main():
 
     store = Store()
     store.load()
-    store.set("code", "espn-2026-form")
+    store.set("code", f"espn-2026-form@{os.uname().nodename if hasattr(os, 'uname') else 'host'}")
     store.save()
 
     if args.once:

@@ -1,5 +1,6 @@
 """Orchestratore: a ogni ciclo raccoglie dati, analizza e salva lo stato."""
 import logging
+import os
 import threading
 import time
 
@@ -488,7 +489,7 @@ def run_cycle(store, quick=False):
     store.set("sources", sources_status)
     store.set("tracking", tracking)
     store.set("calibration", calibration)
-    store.set("code", "espn-core-api")
+    store.set("code", f"espn-core-api@{os.uname().nodename if hasattr(os, 'uname') else 'host'}")
     store.set("fixtures", [fx.to_dict() for fx in sorted(now_fx, key=lambda x: x.start_ts)])
     store.set("value_flags", [f.to_dict() for f in value_flags])
     store.save()
