@@ -180,7 +180,11 @@ SOFASCORE_BASE = "https://www.sofascore.com/api/v1"
 #   espn      : stagione, classifica, risultati, partite, live, quote 1X2
 #               (Bet365) + forma/h2h da calendario squadre. Risponde da Render.
 DATA_SOURCE_ORDER = [s.strip() for s in os.environ.get(
-    "DATA_SOURCE_ORDER", "espn").split(",") if s.strip()]
+    "DATA_SOURCE_ORDER", "espn,sofascore").split(",") if s.strip()]
+# Sofascore è bloccato (403) da IP datacenter/Render e ogni sua chiamata
+# resta in retry Tor blocando il ciclo: escluso per sempre, anche se l'env
+# lo riconfigura. Solo il motore ESPN (che risponde 200) viene usato.
+DATA_SOURCE_ORDER = [s for s in DATA_SOURCE_ORDER if s != "sofascore"]
 
 ODDSPORTAL_SERIEA_URL = "https://www.oddsportal.com/it/football/italy/serie-a/"
 CENTROQUOTE_SERIEA_URL = "https://www.centroquote.it/football/italy/serie-a/"
