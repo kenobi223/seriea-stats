@@ -111,8 +111,8 @@ class LiveMonitor:
 
     def _get_client(self):
         if self.client is None:
-            from app.sources import sofascore as sf_mod
-            self.client = sf_mod.SofascoreClient()
+            from app.sources.client import FootballClient
+            self.client = FootballClient()
         return self.client
 
     # ---------------------------------------------------------- tick

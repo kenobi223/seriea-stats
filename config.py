@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data")
+DATA_DIR = os.path.abspath(os.environ.get("DATA_DIR", os.path.join(BASE_DIR, "data")))
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 WIN_PHOTO = os.path.join(ASSETS_DIR, "win.jpg")   # foto notifiche pronostici
@@ -171,6 +171,27 @@ ASSETS_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 SOFASCORE_BASE = "https://www.sofascore.com/api/v1"
+
+# ------------------------------------------------------------------- fonti dati
+# Ordine del fallback a catena (virgole separate). Capacità per fonte:
+#   sofascore    : tutto (quote 1X2, h2h, lineups, statistiche, incidenti…)
+#   espn         : stagione, classifica, risultati, partite, live (no quote)
+#   api_football : stagione, classifica, risultati, partite, live (no quote 1X2)
+#   football_data: stagione, classifica, risultati, partite (niente live/goal)
+# Su Render metti prima una fonte che non sia bloccata (es. espn,api_football,…).
+DATA_SOURCE_ORDER = [s.strip() for s in os.environ.get(
+    "DATA_SOURCE_ORDER", "sofascore,espn,api_football,football_data").split(",") if s.strip()]
+
+# api-football.com v3 (Serie A = league 135). Chiave dal dashboard ufficiale
+# (header x-apisports-key) oppure account RapidAPI (x-rapidapi-key/host).
+# Vuota = fonte disattivata.
+API_FOOTBALL_LEAGUE = int(os.environ.get("API_FOOTBALL_LEAGUE", "135"))
+API_FOOTBALL_KEY = os.environ.get("API_FOOTBALL_KEY", "")
+API_FOOTBALL_PROVIDER = os.environ.get("API_FOOTBALL_PROVIDER", "direct")  # direct|rapidapi
+
+# football-data.org v4 (Serie A = competition SA), header X-Auth-Token.
+FOOTBALL_DATA_CODE = os.environ.get("FOOTBALL_DATA_CODE", "SA")
+FOOTBALL_DATA_KEY = os.environ.get("FOOTBALL_DATA_KEY", "")
 ODDSPORTAL_SERIEA_URL = "https://www.oddsportal.com/it/football/italy/serie-a/"
 CENTROQUOTE_SERIEA_URL = "https://www.centroquote.it/football/italy/serie-a/"
 SOGOSPORT_SERIEA_URL = "https://www.sogosport.com/calcio/italia/serie-a/"

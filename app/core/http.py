@@ -108,7 +108,7 @@ class HTTPClient:
                         tor_newnym()
                         time.sleep(1 + attempt)
                         continue
-                if resp.status_code in (403, 429) and TOR_FAILOVER_ON_BLOCK and not use_tor:
+                if resp.status_code in (403, 429) and TOR_FAILOVER_ON_BLOCK and not use_tor and not self.bypass_proxy:
                     self._use_tor = True
                     log.warning("blocco HTTP %s da %s: passo a proxy Tor", resp.status_code, url)
                     tor_newnym()

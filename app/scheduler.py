@@ -17,7 +17,7 @@ from app.analysis import lineups as lineups_mod
 from app.core.models import Fixture, OddsPick
 from app import notify
 from app.sources import odds as odds_mod
-from app.sources import sofascore as sf_mod
+from app.sources.client import FootballClient
 from app.sources.centroquote import CentroquoteScraper, SogosportScraper
 
 log = logging.getLogger("scheduler")
@@ -102,7 +102,7 @@ def _league_avg(standings, all_forms):
 # ------------------------------------------------------------------- ciclo
 def run_cycle(store, quick=False):
     t0 = time.time()
-    client = sf_mod.SofascoreClient()
+    client = FootballClient()
     sources_status = dict(store.get("sources", {}))
     sources_status["sofascore"] = True
 
