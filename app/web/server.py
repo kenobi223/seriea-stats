@@ -77,6 +77,52 @@ def create_app(store: Store, tunnel=None):
         return jsonify({"tracked": len(data["records"]),
                         "evaluated": len(out), "records": out})
 
+    @app.post("/api/tracking-import")
+    def api_tracking_import():
+        """Unisce nel ledger (Redis) i record valutati inviati dall'istanza
+        locale. Usato una sola volta per ripristinare le valutazioni del
+        13/09 perse tra Redis e locale. Mantiene entrambi gli id (es. in
+        caso di duplicati lo-fixture): preferisce il record già valutato."""
+        from app.analysis import tracker
+        payload = request.get_json(silent=True) or {}
+        incoming = payload.get("records")
+        if not isinstance(incoming, list):
+            return jsonify({"error": "manca records[]"}), 400
+        def _picks(r):
+            if r.get("picks"):
+                return r["picks"]
+            out = []
+            for m, probs in (r.get("probs") or {}).items():
+                if not isinstance(probs, dict) or not probs:
+                    continue
+                key = max(probs, key=lambda k: probs[k] or 0)
+                if key and probs.get(key):
+                    out.append({"market": m, "pick": key, "prob": probs[key]})
+            return out
+        data = tracker.load()
+        by_id = {r.get("id"): r for r in data["records"]}
+        added = replaced = 0
+        for inc in incoming:
+            if not inc.get("id"):
+                continue
+            cur = by_id.get(inc["id"])
+            if cur is None:
+                inc = dict(inc)
+                if not inc.get("picks"):
+                    inc["picks"] = _picks(inc)
+                data["records"].append(inc)
+                by_id[inc["id"]] = inc
+                added += 1
+            elif inc.get("evaluated") and not cur.get("evaluated"):
+                cur.update(inc)
+                if not cur.get("picks"):
+                    cur["picks"] = _picks(cur)
+                replaced += 1
+        if added or replaced:
+            tracker.save(data)
+        return jsonify({"added": added, "replaced": replaced,
+                        "total": len(data["records"])})
+
     @app.get("/api/live")
     def api_live():
         """Partite in corso + follow dello stato (leggero, pollato ogni ~10s)."""
