@@ -484,6 +484,7 @@ def run_cycle(store, quick=False):
     store.set("sources", sources_status)
     store.set("tracking", tracking)
     store.set("calibration", calibration)
+    store.set("code", "espn-core-api")
     store.set("fixtures", [fx.to_dict() for fx in sorted(now_fx, key=lambda x: x.start_ts)])
     store.set("value_flags", [f.to_dict() for f in value_flags])
     store.save()
