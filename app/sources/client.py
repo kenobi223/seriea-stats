@@ -19,12 +19,12 @@ log = logging.getLogger("sources")
 _CORE = {
     "resolve_season", "standings", "next_fixtures", "build_fixture",
     "event_detail", "odds_to_picks", "event_odds", "season_results",
-    "live_events",
+    "live_events", "team_events",
 }
 # Solo il motore sofascore (lineups/stat/info profondi) li fornisce.
 _ANALYTICS_EMPTY = {
     "lineups": None, "probable_xi": None, "statistics": {},
-    "team_injuries": [], "team_events": [], "referee_events": [],
+    "team_injuries": [], "referee_events": [],
     "collect_past_matches": [], "stats_for_events": {},
     "incidents_for_events": {}, "incidents": [],
 }

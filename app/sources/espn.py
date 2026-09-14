@@ -50,13 +50,17 @@ class EspnClient:
     def __init__(self):
         self.http = HTTPClient(base=_CORE, tor_mode="never", delay=0.3)
         self.web = HTTPClient(base=_WEB, tor_mode="never", delay=0.3)
+        self.sched = HTTPClient(
+            base="https://site.web.api.espn.com/apis/site/v2/sports/soccer/ita.1",
+            tor_mode="never", delay=0.3)
         self._results_cache = (0.0, [])
         self._teams_cache = {}  # team_id -> displayName
         self._events_by_id = {}  # event_id -> dict(comp, odds_1x2)
 
     # ------------------------------------------------------------- stagione
     def resolve_season(self):
-        return {"id": "ita.1", "name": "Serie A", "source": "espn"}
+        # id = anno corrente: i team schedule di ESPN portano season.year
+        return {"id": "2026", "name": "Serie A", "source": "espn"}
 
     def _team_name(self, team_id):
         if team_id not in self._teams_cache:
@@ -245,6 +249,46 @@ class EspnClient:
             "away_score": at.get("score"),
             "referee": {},
         }
+
+    def team_events(self, team_id, max_events=40):
+        """Cronologia partite della squadra dal calendario pubblico ESPN
+        (stessi eventi dei risultati: alimenta forma e h2h senza Sofascore)."""
+        data = self.sched.get(f"/teams/{team_id}/schedule")
+        if not data:
+            return []
+        events = data.get("events") or []
+        out = []
+        for e in events:
+            comps = ((e.get("competitions") or [{}])[0]).get("competitors") or []
+            by_side = {c.get("homeAway"): c for c in comps}
+            h, a = by_side.get("home"), by_side.get("away")
+            if not h or not a:
+                continue
+            ht, at = h.get("team") or {}, a.get("team") or {}
+            status = (e.get("competitions") or [{}])[0].get("status") or {}
+            finished = (status.get("type") or {}).get("state") == "post"
+            hscore = (h.get("score") or {}).get("displayValue")
+            ascore = (a.get("score") or {}).get("displayValue")
+
+            def _int(v):
+                try:
+                    return int(float(v))
+                except (TypeError, ValueError):
+                    return None
+
+            out.append({
+                "id": e.get("id"),
+                "home": ht.get("displayName") or str(ht.get("id")),
+                "away": at.get("displayName") or str(at.get("id")),
+                "home_id": ht.get("id"), "away_id": at.get("id"),
+                "finished": finished,
+                "start_ts": _epoch(e.get("date")),
+                "season_id": str((e.get("season") or {}).get("year")),
+                "home_score": _int(hscore),
+                "away_score": _int(ascore),
+            })
+        out.sort(key=lambda x: x["start_ts"] or 0, reverse=True)
+        return out[:max_events]
 
     def live_events(self):
         out = []

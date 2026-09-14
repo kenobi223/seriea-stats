@@ -172,12 +172,15 @@ ASSETS_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 SOFASCORE_BASE = "https://www.sofascore.com/api/v1"
 
-# ------------------------------------------------------------------- fonti dati
+# ---- fonti dati
 # Ordine del fallback a catena (virgole separate). Capacità per fonte:
-#   sofascore : tutto (quote 1X2, h2h, lineups, statistiche, incidenti…)
-#   espn      : stagione, classifica, risultati, partite, live, quote 1X2 (Bet365)
+#   sofascore : tutto (quote 1X2, h2h, lineups, statistiche, incidenti…).
+#               BLOCCATA da Render (HTTP 403): se presente, ogni chiamata
+#               analitica resta in retry Tor e il ciclo non completa.
+#   espn      : stagione, classifica, risultati, partite, live, quote 1X2
+#               (Bet365) + forma/h2h da calendario squadre. Risponde da Render.
 DATA_SOURCE_ORDER = [s.strip() for s in os.environ.get(
-    "DATA_SOURCE_ORDER", "sofascore,espn").split(",") if s.strip()]
+    "DATA_SOURCE_ORDER", "espn").split(",") if s.strip()]
 
 ODDSPORTAL_SERIEA_URL = "https://www.oddsportal.com/it/football/italy/serie-a/"
 CENTROQUOTE_SERIEA_URL = "https://www.centroquote.it/football/italy/serie-a/"

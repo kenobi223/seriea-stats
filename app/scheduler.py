@@ -104,7 +104,6 @@ def run_cycle(store, quick=False):
     t0 = time.time()
     client = FootballClient()
     sources_status = dict(store.get("sources", {}))
-    sources_status["sofascore"] = True
 
     season = client.resolve_season()
     if not season:
