@@ -36,7 +36,8 @@ def _frac2dec(value):
 
 class SofascoreClient:
     def __init__(self):
-        self.http = HTTPClient(base=config.SOFASCORE_BASE, tor_mode="always")
+        self.http = HTTPClient(base=config.SOFASCORE_BASE,
+                               tor_mode=config.SOFASCORE_TOR_MODE)
         self.cache_dir = os.path.join(config.DATA_DIR, "cache")
         os.makedirs(self.cache_dir, exist_ok=True)
         self._mem = threading.Lock()

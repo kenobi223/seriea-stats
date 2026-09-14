@@ -148,6 +148,10 @@ COACH_AUTO_TTL = 86400                  # 1 rilevazione manager al giorno/squadr
 # Se impostato e la connessione diretta viene bloccata, il client riprova
 # la richiesta attraverso questo proxy (SOCKS).
 # In Docker il target diventa "tor" (il servizio compose), non 127.0.0.1.
+# Modo rete del client Sofascore: "always" (sempre via Tor, default locale),
+# "auto" (parte diretto, passa a Tor solo su blocco), "never" (solo diretto).
+# Su Render i nodi Tor escono su IP 403 da Sofascore: prova "auto"/"never".
+SOFASCORE_TOR_MODE = os.environ.get("SOFASCORE_TOR_MODE", "always")
 TOR_SOCKS_PROXY = os.environ.get("TOR_SOCKS_PROXY", "socks5h://127.0.0.1:9050")
 # Porta di controllo Tor per ordinare il cambio identità (NEWNYM).
 # username/password: lascia "" se usi solo il cookie di autenticazione.
