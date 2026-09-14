@@ -21,3 +21,7 @@ services:
         value: "540"
       - key: PUBLIC_URL
         sync: false
+      - key: ENABLE_SCHEDULER
+        value: "1"
+      - key: DATA_SOURCE_ORDER
+        value: "espn,sofascore"
