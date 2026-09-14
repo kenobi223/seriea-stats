@@ -15,4 +15,4 @@ COPY . .
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 ENV PYTHONUNBUFFERED=1
-CMD ["/entrypoint.sh"]
+CMD ["/entrypoint.sh", "--no-scheduler"]

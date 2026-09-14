@@ -114,7 +114,8 @@ def run_cycle(store, quick=False):
     store.set("season", {"id": season_id, "name": season.get("name")})
 
     standings = client.standings(season_id)
-    store.set("standings", standings)
+    if standings:
+        store.set("standings", standings)
 
     # ---- risultati delle giornate antecedenti (una richiesta, cache di
     #      giornata: cambiano solo quando finiscono le partite)

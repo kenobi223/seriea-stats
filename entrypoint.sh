@@ -14,4 +14,4 @@ while [ "$i" -lt 60 ]; do
   i=$((i+1))
 done
 
-exec python /app/run.py
+exec python /app/run.py "$@"
