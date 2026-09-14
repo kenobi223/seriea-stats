@@ -145,6 +145,10 @@ def run_cycle(store, quick=False):
                     fx.referee = detail["referee"]
         now_fx.append(fx)
 
+    # salva subito i dati core: tengono vivo lo stato anche se le fasi
+    # analitiche successive (forma/h2h/xg) restano in attesa per retry.
+    store.set("fixtures", [fx.to_dict() for fx in sorted(now_fx, key=lambda x: x.start_ts)])
+
     # ---- quote aggiornate a ogni ciclo (10 min)
     for fx in now_fx:
         fx.odds = client.odds_to_picks(fx.id)
@@ -507,7 +511,12 @@ class Scheduler:
 
     def _loop(self):
         log.info("scheduler avviato (intervallo %ds)", config.UPDATE_INTERVAL_SECONDS)
+        first = True
         while not self._stop.is_set():
+            if first:
+                # primo ciclo immediato al boot (no attesa del primo tick)
+                first = False
+                time.sleep(15)
             try:
                 run_cycle(self.store)
             except Exception as e:
