@@ -148,6 +148,7 @@ def run_cycle(store, quick=False):
     # salva subito i dati core: tengono vivo lo stato anche se le fasi
     # analitiche successive (forma/h2h/xg) restano in attesa per retry.
     store.set("fixtures", [fx.to_dict() for fx in sorted(now_fx, key=lambda x: x.start_ts)])
+    store.save()
 
     # ---- quote aggiornate a ogni ciclo (10 min)
     for fx in now_fx:
