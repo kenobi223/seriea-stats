@@ -30,7 +30,6 @@ def create_app(store: Store, tunnel=None):
 
     @app.get("/api/state")
     def api_state():
-        store.load()
         return jsonify(store.data)
 
     @app.get("/api/health")
@@ -127,7 +126,6 @@ def create_app(store: Store, tunnel=None):
         question = (payload.get("question") or "").strip()
         if not question:
             return jsonify({"error": "nessuna domanda"}), 400
-        store.load()
         fixtures = [f for f in store.get("fixtures", [])]
         standings = store.get("standings", [])
         result = ask_ai(question, fixtures, standings)

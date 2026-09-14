@@ -895,7 +895,6 @@ class TelegramBot:
     def _ask(self, chat_id, question):
         tr = Tr(chat_id)
         self._send(chat_id, tr._t("ai_thinking"))
-        self.store.load()
         fixtures = self.store.get("fixtures", [])
         standings = self.store.get("standings", [])
         result = ask_ai(question, fixtures, standings)
