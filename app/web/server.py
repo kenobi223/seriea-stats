@@ -160,6 +160,14 @@ def create_app(store: Store, tunnel=None):
                 out[name] = {"status": r.status_code, "ms": round((_time.time() - t) * 1000)}
             except Exception as e:
                 out[name] = {"status": "ERR", "ms": round((_time.time() - t) * 1000), "err": str(e)[:80]}
+        t = _time.time()
+        try:
+            from app.sources.espn import EspnClient
+            c = EspnClient()
+            res = c.season_results("2026")
+            out["espn_results"] = {"all": sum(len(r.get("matches", [])) for r in res)}
+        except Exception as e:
+            out["espn_results"] = {"all": -1, "err": str(e)[:200]}
         return jsonify(out)
 
     return app
