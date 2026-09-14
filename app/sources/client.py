@@ -2,9 +2,7 @@
 
 Fonte            stagione classifica risultati partite live quote 1X2 analisi
 sofascore           si       si        si       si    si     si        si
-espn                si       si        si       si    si(punteggi) no     no
-api_football        si       si        si       si    si     no(v1)   no
-football_data       si       si        si       si    no     no       no
+espn                si       si        si       si    si(punteggi) si(1X2) no
 
 Le "analisi" (lineups, incidenti, statistiche, arbitri, h2h, forma, xG…)
 riguardano soltanto l'engine sofascore: se nelle fonti non c'e', quei metodi
@@ -13,7 +11,7 @@ rispondono con un default vuoto e le feature affinate degradano.
 import logging
 
 import config
-from app.sources import api_football, espn, football_data, sofascore
+from app.sources import espn, sofascore
 
 log = logging.getLogger("sources")
 
@@ -37,8 +35,6 @@ class FootballClient:
         factories = {
             "sofascore": sofascore.SofascoreClient,
             "espn": espn.EspnClient,
-            "api_football": api_football.ApiFootballClient,
-            "football_data": football_data.FootballDataClient,
         }
         chosen = [n for n in config.DATA_SOURCE_ORDER if n in factories]
         self.sources = [factories[n]() for n in chosen]

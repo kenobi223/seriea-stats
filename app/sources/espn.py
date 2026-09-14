@@ -1,8 +1,7 @@
 """Fonte dati ESPN (API pubblica, senza chiave).
 
-Copre: stagione, classifica, risultati, prossime partite, partite live.
-Non fornisce quote 1X2 (le prende Sofascore) né le analisi profonde.
-Usata come fallback quando Sofascore e' bloccato (es. IP datacenter/Tor).
+Covers: stagione, classifica, risultati, prossime partite, partite live,
+quote 1X2 (moneyline DraftKings, se presenti nei dati scoreboard).
 """
 import logging
 import time
@@ -10,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import config
 from app.core.http import HTTPClient
-from app.core.models import Fixture
+from app.core.models import Fixture, OddsPick
 
 log = logging.getLogger("espn")
 
@@ -24,6 +23,17 @@ def _epoch(iso):
         return int(datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp())
     except (ValueError, AttributeError):
         return 0
+
+
+def _american_to_decimal(odd_str):
+    """Converte quote americane ('-475', '+800') in decimali (1.21, 9.0)."""
+    try:
+        v = int(str(odd_str).strip().replace("+", ""))
+    except (ValueError, AttributeError):
+        return None
+    if v > 0:
+        return round(1 + v / 100, 3)
+    return round(1 + 100 / abs(v), 3)
 
 
 def _date(days=0):
@@ -57,6 +67,7 @@ class EspnClient:
         self.http = HTTPClient(base=_SB, tor_mode="never", delay=0.3)
         self.web = HTTPClient(base=_WEB, tor_mode="never", delay=0.3)
         self._results_cache = (0.0, [])
+        self._events_by_id = {}  # cache eventi per id (quote incluse)
 
     # ------------------------------------------------------------- stagione
     def resolve_season(self):
@@ -100,7 +111,29 @@ class EspnClient:
                 if not comp.get("competitors"):
                     continue
                 out.append(comp)
+                self._events_by_id[comp.get("id")] = comp
         return out
+
+    def odds_to_picks(self, event_id, source="espn"):
+        """Moneyline DraftKings -> OddsPick (market 'Full time', picks 1/X/2)."""
+        comp = self._events_by_id.get(event_id)
+        if not comp:
+            return []
+        odds_list = comp.get("odds") or []
+        if not odds_list:
+            return []
+        odds_obj = odds_list[0] or {}
+        ml = odds_obj.get("moneyline") or {}
+        picks = []
+        for key, pick_label in [("home", "1"), ("draw", "X"), ("away", "2")]:
+            side = ml.get(key) or {}
+            dec = _american_to_decimal(side.get("close", {}).get("odds")
+                                       or side.get("open", {}).get("odds"))
+            if dec is None:
+                continue
+            picks.append(OddsPick(source=source, market="Full time",
+                                  pick=pick_label, odds=dec))
+        return picks
 
     def next_fixtures(self, season_id, days=10):
         rows = []
@@ -207,5 +240,5 @@ class EspnClient:
             venue=detail.get("venue", ""), status=detail.get("status", ""),
             referee=detail.get("referee", {}),
         )
-        fx.odds = []
+        fx.odds = self.odds_to_picks(row[0])
         return fx
