@@ -76,6 +76,11 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
+    # Interruttore operativo: se ENABLE_SCHEDULER=1 sovrascrive il default
+    # --no-scheduler del container (per attivare la raccolta su Render).
+    if os.environ.get("ENABLE_SCHEDULER", "").lower() in ("1", "true", "yes"):
+        args.no_scheduler = False
+
     setup_logging(args.verbose)
 
     store = Store()
