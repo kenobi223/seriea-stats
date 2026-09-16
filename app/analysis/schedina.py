@@ -21,6 +21,7 @@ from app.core import markets
 log = logging.getLogger("schedina")
 
 MATCHDAY_WINDOW = 4 * 86400   # la giornata dura al massimo ~96h (ven-lun)
+SCHEDINA_VERSION = 2          # incrementa per ricostruire le schedine vecchie
 
 
 def current_round(store):
@@ -32,7 +33,7 @@ def current_round(store):
     return int(max(played) + 1) if played else None
 
 
-# ---------- selezione esiti diversificata --------------------------------
+# ---------- selezione esiti: uno per partita, mercati alternati ----------
 def _candidates(now_fx):
     """Un candidato per mercato e partita: il pick più probabile del modello.
 
@@ -46,46 +47,36 @@ def _candidates(now_fx):
             p = mp.get(market)
             if not p:
                 continue
-            prob = p.get("prob") or 0
-            if prob < config.SCHEDINA_MIN_PROB:
-                continue
             real_odds = p.get("odds")
             out.append({
                 "fixture_id": fx.id, "home": fx.home, "away": fx.away,
                 "start_ts": fx.start_ts, "market": market,
                 "pick": p.get("key") or p.get("pick"),
                 "odds": real_odds or p.get("fair"),
-                "prob": prob,
-                "edge": round(prob * real_odds - 1, 3) if real_odds else None,
+                "prob": p.get("prob") or 0,
+                "edge": round((p.get("prob") or 0) * real_odds - 1, 3)
+                if real_odds else None,
             })
     return out
 
 
-def _select(cands, max_picks):
-    """Prende un esito per mercato (diversificato) dalle partite migliori."""
-    by_mkt = {}
+def _select(cands):
+    """Uno esito per ogni partita della giornata, altemando mercato
+    (1X2 → O/U → BTTS) così la schedina copre tutte le partite senza essere
+    tutta 1X2. Se l'esito del mercato assegnato è sotto SCHEDINA_MIN_PROB
+    prende comunque il più probabile di quella partita."""
+    by_fx = {}
     for c in cands:
-        by_mkt.setdefault(c["market"], []).append(c)
-    for m in by_mkt:
-        by_mkt[m].sort(key=lambda c: c["prob"], reverse=True)
-    picked, used = [], set()
-    markets_order = [m for m in ("1x2", "over_under", "btts")
-                     if m in by_mkt]
-    while len(picked) < max_picks:
-        added = False
-        for m in markets_order:
-            for c in by_mkt[m]:
-                if c["fixture_id"] in used:
-                    continue
-                picked.append(c)
-                used.add(c["fixture_id"])
-                by_mkt[m].remove(c)
-                added = True
-                break
-            if len(picked) >= max_picks:
-                break
-        if not added:
-            break
+        by_fx.setdefault(c["fixture_id"], []).append(c)
+    order = ("1x2", "over_under", "btts")
+    picked = []
+    for i, (fid, cs) in enumerate(by_fx.items()):
+        min_prob = config.SCHEDINA_MIN_PROB
+        pool = [c for c in cs if c["prob"] >= min_prob] or cs
+        mkt = order[i % len(order)]
+        chosen = next((c for c in pool if c["market"] == mkt), None) \
+            or max(pool, key=lambda c: c["prob"])
+        picked.append(chosen)
     return picked
 
 
@@ -128,7 +119,8 @@ def build(store, now_fx):
     upcoming.sort(key=lambda f: f.start_ts)
     rnd = current_round(store)
     cur = store.get("schedina") or {}
-    if cur.get("round") == rnd and cur.get("picks"):
+    if cur.get("round") == rnd and cur.get("picks") \
+            and cur.get("v") == SCHEDINA_VERSION:
         return cur
 
     # la finestra di 10 giorni di next_fixtures può spanciare due turni:
@@ -136,16 +128,17 @@ def build(store, now_fx):
     from_ts = upcoming[0].start_ts
     in_round = [f for f in upcoming if f.start_ts - from_ts < MATCHDAY_WINDOW]
 
-    picks = _select(_candidates(in_round), config.SCHEDINA_MAX_PICKS)
+    picks = _select(_candidates(in_round))
     if not picks:
         return cur
 
     history = list(cur.get("history", []))
-    if cur.get("round") and cur.get("picks"):
+    if cur.get("round") and cur.get("picks") \
+            and cur.get("round") != rnd:
         history.append(_summary_record(cur))
     history = history[-config.SCHEDINA_MAX_HISTORY:]
 
-    slip = {"round": rnd, "created_at": int(now),
+    slip = {"round": rnd, "created_at": int(now), "v": SCHEDINA_VERSION,
             "picks": picks, "history": history}
     store.set("schedina", slip)
     log.info("schedina giornata %s: %d esiti (%s)", rnd, len(picks),
@@ -273,9 +266,11 @@ if __name__ == "__main__":
     st = _Store({"standings": [{"played": 3} for _ in range(10)]})
     slip = build(st, fx)
     assert slip["round"] == 4, slip
-    # diversificati: un mercato diverso per i primi esiti
-    mkts = [p["market"] for p in slip["picks"]]
-    assert "over_under" in mkts and "1x2" in mkts, mkts
+    # un esito per ogni partita del turno
+    assert [p["fixture_id"] for p in slip["picks"]] == ["a", "b", "c"], slip
+    # mercati alternati: 1x2, over_under, btts
+    assert [p["market"] for p in slip["picks"]] == \
+        ["1x2", "over_under", "btts"], slip
     # valutazione: "a" finisce 1-1, "b" finisce 3-2
     st.set("results", [{"round": 4, "matches": [
         {"id": "a", "hs": 1, "as": 1}, {"id": "b", "hs": 3, "as": 2}]}])
@@ -283,13 +278,13 @@ if __name__ == "__main__":
     a = next(p for p in slip["picks"] if p["fixture_id"] == "a")
     assert a["result"] == "loss", a  # 1-1 vs pick "1" (1x2)
     bwin = next(p for p in slip["picks"]
-                if p["fixture_id"] == "b" and p["market"] == "btts")
-    assert bwin["result"] == "win", bwin  # 3-2 vs "si" (BTTS)
+                if p["fixture_id"] == "b" and p["market"] == "over_under")
+    assert bwin["result"] == "win", bwin  # 3-2 vs "over_2.5"
     # la vincita di "b" è notificabile una sola volta
     assert len(pending_wins(st)) == 1, pending_wins(st)
     mark_wins_notified(st, [w["id"] for w in pending_wins(st)])
     assert pending_wins(st) == []
-    # notifiche: "si" di "c" valutato al turno dopo non si perde mai
+    # notifica: "si" di "c" valutato al turno dopo non si perde mai
     fx2 = [_Fx("d", "G", "H", now + 8 * 86400, {
         "1x2": {"key": "1", "prob": 0.6, "odds": 1.7},
         "over_under": {"key": "under_2.5", "prob": 0.55, "odds": 1.8},
@@ -298,4 +293,9 @@ if __name__ == "__main__":
     slip2 = build(st, fx2)
     assert slip2["round"] == 5, slip2
     assert len(slip2["history"]) == 1, slip2
+    # una schedina di versione vecchia per la stessa giornata va ricostruita
+    st["schedina"] = {"round": 5, "created_at": 1, "v": 1,
+                      "picks": [{"fixture_id": "z"}], "history": []}
+    slip3 = build(st, fx2)
+    assert slip3["round"] == 5 and len(slip3["picks"]) == 1, slip3
     print("schedina self-check OK")

@@ -99,9 +99,8 @@ CALIBRATION_CLAMP_HI = 1.45             # correttore massimo applicabile (1.45 =
 # partita non era in diretta (app spenta / avvio successivo).
 TRACKING_EVAL_DELAY_HOURS = float(os.environ.get("TRACKING_EVAL_DELAY_HOURS", "2.5"))
 
-# Schedina della giornata: quanti esiti diversificati e quante giornate
-# archiviate nel registro storico.
-SCHEDINA_MAX_PICKS = 4
+# Schedina della giornata: un esito per ogni partita del turno; quante
+# giornate archiviate nel registro storico.
 SCHEDINA_MAX_HISTORY = 12
 SCHEDINA_MIN_PROB = 0.50               # probabilità minima per entrare in schedina
 
