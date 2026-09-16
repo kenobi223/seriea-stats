@@ -16,39 +16,26 @@ fixtures:
 con `since` recente (<= NEW_MANAGER_WINDOW_DAYS) è in "nuova era" e subisce
 l'effetto bounce nel predictor e nel morale pre-partita.
 """
-import json
 import logging
-import os
 import time
 
 import config
+from app.core import kv
 
 log = logging.getLogger("coach")
 
 
 def load():
-    path = config.COACHES_FILE
-    if os.path.exists(path):
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict) and isinstance(data.get("teams"), dict):
-                return data
-        except Exception as e:
-            log.exception("coaches.json illeggibile: %s", e)
+    """Legge il registro dal backend persistente (Redis se configurato,
+    altrimenti `data/coaches.json`)."""
+    data = kv.read_json("coaches.json")
+    if isinstance(data, dict) and isinstance(data.get("teams"), dict):
+        return data
     return {"teams": {}, "updated": 0}
 
 
 def save(reg):
-    os.makedirs(config.DATA_DIR, exist_ok=True)
-    reg["updated"] = int(time.time())
-    tmp = config.COACHES_FILE + ".tmp"
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(reg, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, config.COACHES_FILE)
-    except Exception as e:
-        log.warning("coaches.json non salvato: %s", e)
+    kv.write_json("coaches.json", dict(reg, updated=int(time.time())))
 
 
 def _manager_from_sofascore(client, team_id):
