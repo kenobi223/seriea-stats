@@ -47,6 +47,20 @@ def create_app(store: Store, tunnel=None):
         return jsonify({"updated": store.get("updated", 0),
                         "results": store.get("results", [])})
 
+    @app.get("/api/schedina")
+    def api_schedina():
+        """Schedina della giornata + storico con contatori vinti/persi."""
+        from app.analysis import schedina
+        slip = store.get("schedina") or {}
+        picks = slip.get("picks") or []
+        wins = sum(1 for p in picks if p.get("result") == "win")
+        losses = sum(1 for p in picks if p.get("result") == "loss")
+        return jsonify({
+            "round": slip.get("round"), "created_at": slip.get("created_at"),
+            "wins": wins, "losses": losses, "picks": picks,
+            "history": slip.get("history", []),
+        })
+
     @app.get("/api/tracking-records")
     def api_tracking_records():
         """Record valutati dal tracker: pick/best-bet vs esito reale (debug)."""
@@ -125,20 +139,20 @@ def create_app(store: Store, tunnel=None):
 
     @app.post("/api/tracking-renotify")
     def api_tracking_renotify():
-        """Retest notifiche: azzera win_notified e reinvia subito la foto."""
-        from app.analysis import tracker
+        """Retest notifiche: azzera win_notified della schedina e reinvia."""
+        from app.analysis import schedina
         from app import notify
-        data = tracker.load()
-        now = __import__("time").time()
+        slip = store.get("schedina") or {}
         n = 0
-        for r in data["records"]:
-            if r.get("win_notified") and r.get("evaluated"):
-                r["win_notified"] = False
+        for p in slip.get("picks") or []:
+            if p.get("win_notified"):
+                p["win_notified"] = False
                 n += 1
-        tracker.save(data)
-        pending = tracker.pending_wins()
+        if n:
+            store.set("schedina", slip)
+        pending = schedina.pending_wins(store)
         if pending:
-            notify.send_pending_wins()
+            notify.send_pending_wins(store)
         return jsonify({"reset": n, "pending": len(pending)})
 
     @app.get("/api/live")
@@ -148,40 +162,6 @@ def create_app(store: Store, tunnel=None):
         if not live:
             return jsonify({"updated": 0, "matches": []})
         return jsonify(live)
-
-    @app.post("/api/odds")
-    def api_add_odds():
-        """Aggiunge una quota manuale (proprio per i mercati giocatore es.
-        'Lautaro Tiro in porta' che i comparatori non coprono)."""
-        payload = request.get_json(silent=True) or {}
-        required = ("home", "away", "market", "pick", "source", "odds")
-        if not all(k in payload for k in required):
-            return jsonify({"error": "servono: home, away, market, pick, source, odds"}), 400
-        entry = {
-            "home": payload["home"], "away": payload["away"],
-            "market": payload["market"], "pick": payload["pick"],
-            "source": payload["source"], "odds": float(payload["odds"]),
-        }
-        try:
-            manual = kv.read_json("manual_odds.json", default=[])
-        except Exception:
-            manual = []
-        if not isinstance(manual, list):
-            manual = []
-        manual.append(entry)
-        kv.write_json("manual_odds.json", manual)
-        log.info("quota manuale aggiunta: %s", entry)
-        return jsonify({"ok": True, "total": len(manual)})
-
-    @app.get("/api/manual-odds")
-    def api_manual_odds():
-        data = kv.read_json("manual_odds.json", default=[])
-        return jsonify(data if isinstance(data, list) else [])
-
-    @app.delete("/api/manual-odds")
-    def api_clear_manual_odds():
-        kv.write_json("manual_odds.json", [])
-        return jsonify({"ok": True})
 
     @app.post("/api/ask")
     def api_ask():

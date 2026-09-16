@@ -74,42 +74,6 @@ function oddsTable(fx) {
   return html;
 }
 
-function lineupsBlock(fx, side) {
-  const pxi = fx.probable_xi && fx.probable_xi[side];
-  const lu = fx.lineups && fx.lineups[side];
-  const form = side === "home" ? fx.form_home : fx.form_away;
-  const src = pxi || lu;
-  if (!src || !src.players) {
-    return `<div class="muted">Formazione non ancora ufficiale. L'ultimo undici noto sarà mostrato a ridosso del calcio d'inizio.</div>`;
-  }
-  const starters = src.players.slice(0, 11);
-  const list = starters.map(p => {
-    let b = p.lineup_conf === "new" ? `<span class="lnew">novità</span>` : "";
-    if (p.src === "both") b = `<span class="lsrc" title="concorda con il modello">✔</span>`;
-    else if (p.src === "model") b = b + `<span class="lmod" title="scelta del modello">mod</span>`;
-    else if (p.src === "sf") b = b + `<span class="lsrc" title="solo Sofascore">sf</span>`;
-    return `<span class="chip gray">${esc(p.shirt || "")} ${esc(p.name)}${b}</span>`;
-  }).join(" ");
-  const inj = (pxi && pxi.missing || []).map(m =>
-    `${esc(m.name)} <span class="muted">(${esc(m.reason || "?" )}${m.until ? " fino " + fmtIsoDate(m.until) : ""})</span>`
-  ).join(", ");
-  const injrows = inj
-    ? `<div class="injuries" style="margin-top:6px">🚑 Assenti: ${inj}</div>` : "";
-  const source = !pxi ? (lu && lu.confirmed ? "Formazione ufficiale" : "Ultimo undici ufficiale")
-    : pxi._source === "model" ? "XI probabile · previsione dati"
-    : pxi._source === "merge" ? "XI probabile · Sofascore + modello" : "XI probabile";
-  const contese = pxi && pxi.contese && pxi.contese.length
-    ? `<div style="margin-top:6px;font-size:11.5px;color:var(--warn)">⚡ In corsa (modello): ${pxi.contese.map(esc).join(", ")}</div>` : "";
-  return `<div class="muted" style="margin-bottom:6px">
-      ${source}
-      ${src.formation ? ` · ${esc(src.formation)}` : ""}</div>
-      <div class="chips">${list}</div>
-      ${injrows}
-      ${contese}
-      ${(form && form.injuries || []).slice(0, 3).map(i => esc(i.player)).join(", ")
-        ? `<div style="margin-top:6px;font-size:11.5px;color:var(--warn)">⚠ Lista infermeria: ${(form.injuries || []).slice(0, 3).map(i => esc(i.player)).join(", ")}</div>` : ""}`;
-}
-
 function moraleBlock(fx, side) {
   const m = (fx.morale && fx.morale[side]) || {};
   const name = side === "home" ? fx.home : fx.away;
@@ -144,93 +108,15 @@ function postMorale(home, away, sideHome) {
   return "▼ crisi";
 }
 
-function fmtIsoDate(iso) {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "";
-  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function scorerBlock(fx, side) {
-  const list = (fx.scorer_probabilities && fx.scorer_probabilities[side]) || [];
-  const team = side === "home" ? fx.home : fx.away;
-  if (!list.length) {
-    return `<div class="muted">Nessun dato marcatori per ${esc(team)}.</div>`;
-  }
-  const rows = list.slice(0, 3).map(r => {
-    const w = Math.max(4, Math.min(100, (r.prob_pct || 1)));
-    const minIcon = r.prob_pct >= 40 ? "🔥" : (r.prob_pct >= 25 ? "⚡" : "");
-    return `
-      <div class="ps-row">
-        <div class="ps-main">
-          <span class="ps-name">${esc(r.name)}${minIcon}
-            ${r.pos ? `<span class="ps-pos">${esc(r.pos)}</span>` : ""}</span>
-          <span class="ps-num"><b>${r.prob_pct}%</b> · ${r.goals_last5} gol ult. ${r.matches_last5} g</span>
-        </div>
-        <div class="ps-mid">
-          <div class="ps-bar"><div class="ps-fill" style="width:${w}%"></div></div>
-          <span class="ps-threat">${r.prob_pct}%</span>
-        </div>
-        ${r.avg_sot != null ? `<div class="ps-meta muted">SOT ${Number(r.avg_sot).toFixed(2)}/gara · opp. subisce ${r.opp_goals_conceded}/g</div>` : ""}
-      </div>`;
-  }).join("");
-  return `<div class="muted" style="font-size:11px;margin-bottom:6px">Probabilità di andare a segno: forma ultimi 5, tiri in porta e difesa avversaria</div>${rows}`;
-}
-
-function playerShotsBlock(fx, side) {
-  const list = (fx.player_shots && fx.player_shots[side]) || [];
-  const team = side === "home" ? fx.home : fx.away;
-  if (!list.length) {
-    return `<div class="muted">Nessun dato tiri in porta giocatore per ${esc(team)} (dalla media degli ultimi match).</div>`;
-  }
-  const confIcon = {high: "🟢", medium: "🟡", low: "🔴"};
-  const trendIcon = {up: "▲", down: "▼", flat: "▪"};
-  const rows = list.slice(0, 7).map(r => {
-    const conf = confIcon[r.conf] || "";
-    const trend = trendIcon[r.trend] || "";
-    const fair = (r.fair_o05 != null)
-      ? `<span class="ps-fair">Ov 0.5 <b>@${Number(r.fair_o05).toFixed(2)}</b>${r.fair_o15 != null ? ` · Ov 1.5 <b>@${Number(r.fair_o15).toFixed(2)}</b>` : ""}</span>`
-      : "";
-    const expected = r.expected != null ? `<span class="ps-exp">atteso <b>${Number(r.expected).toFixed(2)}</b> vs avv.</span>` : "";
-    const w = Math.max(4, Math.min(100, (r.threat || 1) * 10));
-    return `
-      <div class="ps-row">
-        <div class="ps-main">
-          <span class="ps-name">${esc(r.name)}${conf}${trend}
-            ${r.pos ? `<span class="ps-pos">${esc(r.pos)}</span>` : ""}</span>
-          <span class="ps-num"><b>${Number(r.avg).toFixed(2)}</b> a gara · ${esc(r.played)} g</span>
-        </div>
-        <div class="ps-mid">
-          <div class="ps-bar"><div class="ps-fill" style="width:${w}%"></div></div>
-          <span class="ps-threat">${r.threat || "?"} /10</span>
-        </div>
-        ${fair || expected ? `<div class="ps-meta">${expected}${expected ? " " : ""}${fair}</div>` : ""}
-      </div>`;
-  }).join("");
-  return `<div class="muted" style="font-size:11px;margin-bottom:6px">Minaccia offensiva: media, quota fair e atteso vs avversario</div>${rows}`;
-}
-
 function formBlock(fx, side) {
   const form = (side === "home" ? fx.form_home : fx.form_away) || {};
   const lasts = form.last_results || [];
   const chips = lasts.slice(-6).map(e => chipFrom(resultCharMap(e.result) || "?")).join("");
   const season = form.current_season;
-  const shots = form.shots_avg;
-  const cards = form.cards_y_avg;
   return `
     <div class="kv"><span class="muted">Ultimi:</span><span class="chips">${chips}</span></div>
     ${season ? `<div class="kv"><span class="muted">Stagione:</span><b>${season.giocate} g · ${season.v}V ${season.n}N ${season.p}P · GF ${season.gf} GA ${season.ga}</b></div>` : ""}
-    ${shots != null ? `<div class="kv"><span class="muted">Tiri in porta/gara:</span><b>${shots}</b></div>` : ""}
-    ${cards != null ? `<div class="kv"><span class="muted">Gialli subiti/gara:</span><b>${cards}</b></div>` : ""}
   `;
-}
-
-function refereeBlock(ref) {
-  if (!ref || !ref.name) return `<div class="muted">Arbitro non ancora comunicato.</div>`;
-  const career = ref.games ? `${ref.games} gare, ${(ref.yellow / ref.games).toFixed(1)} gialli/g, ${(ref.red / ref.games).toFixed(2)} rossi/g` : "";
-  const season = ref.season_y_per_game != null
-    ? `in stagione (${ref.season_games} g): ${ref.season_y_per_game} gialli/g, ${ref.season_r_per_game} rossi/g` : "";
-  return `<div><b>${esc(ref.name)}</b></div>
-    <div class="muted" style="font-size:12px">${esc(career)}${career && season ? " · " : ""}${esc(season)}</div>`;
 }
 
 function predictionBlock(fx) {
@@ -260,12 +146,6 @@ function predictionBlock(fx) {
   if (lambdas.home_goals != null) {
     html += `<div class="kv" style="margin-top:6px"><span class="muted">Gol attesi:</span>
       <b>${esc(fx.home)} ${lambdas.home_goals} — ${lambdas.away_goals} ${esc(fx.away)}</b></div>`;
-  }
-  const xg = p.xg || {};
-  if (xg.enabled) {
-    html += `<div class="kv"><span class="muted">xG (gol attesi reali):</span>
-      <b>${esc(fx.home)} ${Number(xg.home_for).toFixed(2)}↔${Number(xg.home_ag).toFixed(2)}
-       · ${esc(fx.away)} ${Number(xg.away_for).toFixed(2)}↔${Number(xg.away_ag).toFixed(2)}</b></div>`;
   }
   if (ou["over_2.5"] != null) {
     html += `<div class="kv"><span class="muted">Over/Under 2.5:</span>
@@ -311,28 +191,6 @@ function predictionBlock(fx) {
   return html || `<div class="muted">Nessun pronostico.</div>`;
 }
 
-function savesBlock(fx, side) {
-  const ks = fx.keeper_saves || {};
-  const b = ks[side];
-  if (!b) return `<div class="muted">Nessun dato sulle parate.</div>`;
-  const rows = [];
-  rows.push(`<div class="kv"><span class="muted">Portiere:</span><b>${esc(b.gk || (side === "home" ? fx.home : fx.away))}</b></div>`);
-  rows.push(`<div class="kv"><span class="muted">Media parate (${b.played || 0} g):</span><b>${fmtOdds(b.avg || 0)}</b></div>`);
-  if (b.expected != null) {
-    rows.push(`<div class="kv"><span class="muted">Stimate oggi (~):</span><b>${fmtOdds(b.expected)}</b></div>`);
-  }
-  if (b.over_prob != null && b.threshold != null) {
-    const fair = b.fair_over ? ` · fair @${fmtOdds(b.fair_over)}` : "";
-    rows.push(`<div class="kv"><span class="muted">Over ${b.threshold} parate:</span>
-      <b>${(b.over_prob * 100).toFixed(0)}%${fair}</b></div>`);
-  }
-  if (b.pick) {
-    rows.push(`<div class="kv"><span class="chip v">${esc(b.pick.toUpperCase())}</span>
-      <b class="muted">(${esc(b.conf || "")})</b></div>`);
-  }
-  return rows.join("");
-}
-
 function renderMatches() {
   const el = document.getElementById("tab-matches");
   const fixtures = (state.data.fixtures || []).filter(f => f.status !== "finished" || true);
@@ -357,27 +215,7 @@ function renderMatches() {
         <div class="grid3" style="margin-top:12px">
           <div class="subpanel"><h3>${esc(fx.home)}</h3>${formBlock(fx, "home")}</div>
           <div class="subpanel"><h3>${esc(fx.away)}</h3>${formBlock(fx, "away")}</div>
-          <div class="subpanel"><h3>Arbitro</h3>${refereeBlock(fx.referee)}</div>
-        </div>
-        <div class="grid2" style="margin-top:12px">
-          <div class="subpanel"><h3>Formazione provabile · ${esc(fx.home)}</h3>${lineupsBlock(fx, "home")}</div>
-          <div class="subpanel"><h3>Formazione provabile · ${esc(fx.away)}</h3>${lineupsBlock(fx, "away")}</div>
-        </div>
-        <div class="grid2" style="margin-top:12px">
-          <div class="subpanel"><h3>🎯 Tiri in porta · ${esc(fx.home)}</h3>${playerShotsBlock(fx, "home")}</div>
-          <div class="subpanel"><h3>🎯 Tiri in porta · ${esc(fx.away)}</h3>${playerShotsBlock(fx, "away")}</div>
-        </div>
-        <div class="grid2" style="margin-top:12px">
-          <div class="subpanel"><h3>🎭 Morale & conferenze · ${esc(fx.home)}</h3>${moraleBlock(fx, "home")}</div>
-          <div class="subpanel"><h3>🎭 Morale & conferenze · ${esc(fx.away)}</h3>${moraleBlock(fx, "away")}</div>
-        </div>
-        <div class="grid2" style="margin-top:12px">
-          <div class="subpanel"><h3>⚽ Probabilità marcatori · ${esc(fx.home)}</h3>${scorerBlock(fx, "home")}</div>
-          <div class="subpanel"><h3>⚽ Probabilità marcatori · ${esc(fx.away)}</h3>${scorerBlock(fx, "away")}</div>
-        </div>
-        <div class="grid2" style="margin-top:12px">
-          <div class="subpanel"><h3>🧤 Parate portiere · ${esc(fx.home)}</h3>${savesBlock(fx, "home")}</div>
-          <div class="subpanel"><h3>🧤 Parate portiere · ${esc(fx.away)}</h3>${savesBlock(fx, "away")}</div>
+          <div class="subpanel"><h3>🎭 Morale & conferenze</h3>${moraleBlock(fx, "home")}${moraleBlock(fx, "away")}</div>
         </div>
       </div>`);
   }
@@ -646,89 +484,16 @@ function renderStandings() {
     formByTeam.set(fx.away_id, fx.form_away);
   }
   el.innerHTML = `<div class="card"><table>
-    <thead><tr><th>#</th><th>Squadra</th><th>G</th><th>V</th><th>N</th><th>P</th><th>GF</th><th>GA</th><th>Pt</th><th>Tiri porta</th></tr></thead><tbody>` +
+    <thead><tr><th>#</th><th>Squadra</th><th>G</th><th>V</th><th>N</th><th>P</th><th>GF</th><th>GA</th><th>Pt</th><th>Ultime 5</th></tr></thead><tbody>` +
     rows.map(r => {
       const f = formByTeam.get(r.team_id);
-      const shots = f && f.shots_avg != null ? f.shots_avg : "—";
       const last = f ? (f.last_results || []).slice(-5).map(e => chipFrom(resultCharMap(e.result) || "?")).join("") : "";
       return `<tr><td class="pos-chip">${r.position}</td><td>${esc(r.name)}</td>
         <td>${r.played}</td><td>${r.wins}</td><td>${r.draws}</td><td>${r.losses}</td>
         <td>${r.gf}</td><td>${r.ga}</td><td><b>${r.points}</b></td>
-        <td>${shots}<span class="chips" style="margin-left:6px">${last}</span></td></tr>`;
+        <td><span class="chips">${last}</span></td></tr>`;
     }).join("") +
     `</tbody></table></div>`;
-}
-
-// ------------------------------------------------------------- manual odds
-function renderManual() {
-  const el = document.getElementById("tab-manual");
-  el.innerHTML = `
-    <div class="card">
-      <div class="section-title">Importa quota manuale (Sisal, SNAI, ecc.)</div>
-      <p class="muted" style="margin-top:-6px">Usa questo modulo per i mercati che i comparatori non coprono, es. 
-      "Lautaro Tiro in porta" @1.80 su Sisal e @2.50 su SNAI: inseriscili entrambi e verranno confrontati automaticamente.</p>
-      <div class="form-row compact">
-        <input id="m-home" placeholder="Casa (es. Inter)">
-        <input id="m-away" placeholder="Trasferta (es. Roma)">
-        <input id="m-market" placeholder="Mercato (es. Tiri in porta)">
-        <input id="m-pick" placeholder="Esito (es. Lautaro) ">
-        <input id="m-source" placeholder="Bookmaker (es. sisal)">
-        <input id="m-odds" type="number" step="0.01" min="1.01" placeholder="Quota (es. 1.80)">
-      </div>
-      <button class="cta" onclick="addManualOdds()">Aggiungi quota</button>
-    </div>
-    <div class="card">
-      <div class="section-title" id="manual-list-title">Quote inserite manualmente</div>
-      <div id="manual-list"></div>
-      <button class="ghost" style="margin-top:8px" onclick="clearManual()">Svuota elenco</button>
-    </div>`;
-  refreshManualList();
-}
-
-async function refreshManualList() {
-  const el = document.getElementById("manual-list");
-  if (!el) return;
-  try {
-    const r = await fetch("/api/manual-odds");
-    const list = await r.json();
-    el.innerHTML = list.length
-      ? `<table><thead><tr><th>Casa</th><th>Trasferta</th><th>Mercato</th><th>Esito</th><th>Bookmaker</th><th class="right">Quota</th></tr></thead><tbody>` +
-        list.map(x => `<tr><td>${esc(x.home)}</td><td>${esc(x.away)}</td><td>${esc(x.market)}</td>
-          <td>${esc(x.pick)}</td><td>${esc(x.source)}</td><td class="right"><b>${fmtOdds(x.odds)}</b></td></tr>`).join("") +
-        `</tbody></table>`
-      : `<div class="muted">Nessuna quota manuale. Le quote Sofascore vengono comunque confrontate automaticamente.</div>`;
-  } catch (e) {
-    el.innerHTML = `<div class="muted">Errore nel caricamento.</div>`;
-  }
-}
-
-async function addManualOdds() {
-  const get = id => document.getElementById(id).value.trim();
-  const payload = {
-    home: get("m-home"), away: get("m-away"), market: get("m-market"),
-    pick: get("m-pick"), source: get("m-source"),
-    odds: parseFloat(get("m-odds")),
-  };
-  if (!payload.home || !payload.away || !payload.market || !payload.source || !payload.odds) {
-    alert("Compila tutti i campi (es. Inter / Roma / Tiri in porta / Lautaro / sisal / 1.80)");
-    return;
-  }
-  const r = await fetch("/api/odds", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const res = await r.json();
-  if (res.ok) {
-    ["m-home", "m-away", "m-market", "m-pick", "m-source", "m-odds"].forEach(id => (document.getElementById(id).value = ""));
-    refreshManualList();
-  } else {
-    alert(res.error || "Errore");
-  }
-}
-
-async function clearManual() {
-  await fetch("/api/manual-odds", { method: "DELETE" });
-  refreshManualList();
 }
 
 // ------------------------------------------------------------- sources
@@ -736,29 +501,25 @@ function renderSources() {
   const el = document.getElementById("tab-sources");
   const s = state.data.sources || {};
   const rows = [
-    ["Sofascore", "risultati, statistiche, arbitri, quote 1X2", s.sofascore ? "attivo" : "inattivo", true],
+    ["Sofascore", "risultati, statistiche, quote 1X2", s.sofascore ? "attivo" : "inattivo", true],
+    ["ESPn", "stagione, classifica, risultati, live, quote 1X2", (s.espn && s.espn.status) ? "attivo" : "inattivo", true],
     ["centroquote", "conferma calendario Serie A dall'Italia", s.centroquote ? "raggiungibile" : "non raggiungibile da questo IP (datacenter)", false],
     ["sogosport", "quote bookmaker italiane (best-effort)", s.sogosport ? "raggiungibile" : "non raggiungibile da questo IP (datacenter)", false],
-    ["Sisal / SNAI (manuale)", "quote inserite a mano per i mercati giocatore", "usa il tab «Import quote»", false],
   ];
   el.innerHTML = `<div class="card"><table>
     <thead><tr><th>Fonte</th><th>Cosa fornisce</th><th>Stato</th></tr></thead><tbody>` +
     rows.map(r => `<tr><td><b>${esc(r[0])}</b></td><td>${esc(r[1])}</td>
       <td style="color:${r[3] ? "var(--accent)" : "var(--muted)"}">${esc(r[2])}</td></tr>`).join("") +
-    `</tbody></table>
-    <div style="margin-top:12px" class="muted">NB: i bookmaker italiani (Sisal, SNAI, Goldbet...) spesso bloccano gli IP dei data center.
-    Se il server gira sulla rete di casa, lo scraper li rileva in automatico. In ogni caso il confronto manuale copre i mercati
-    giocatore come i tiri in porta.</div></div>`;
+    `</tbody></table></div>`;
 }
 
 // ------------------------------------------------------------- AI chat
 let aiReady = false;
 
 const AI_SUGGESTIONS = [
-  "Che tiri in porta mi consigli? non scontati",
   "Ci sono errori di quota oggi?",
   "Qual è il pronostico della giornata?",
-  "Arbitri con più cartellini",
+  "Analizza Juventus - Milan",
 ];
 
 function initAI() {
@@ -775,13 +536,13 @@ function initAI() {
     el.innerHTML = `
     <div class="card ai-card">
       <div class="section-title">Chiedi all'AI · consigli sui dati reali raccolti</div>
-      <p class="muted" style="margin-top:-6px">Chiedi in italiano: raccomandazioni sui tiri in porta
-      (scontati o probabili), errori di quota, pronostici, arbitri o un'analisi partita.</p>
+      <p class="muted" style="margin-top:-6px">Chiedi in italiano: pronostici, errori di quota
+      o un'analisi partita.</p>
       <div class="ai-suggest">${suggestions.map((s, i) =>
         `<button class="chip ai-chip" onclick="askAIByIndex(${i})">${esc(s)}</button>`).join(" ")}</div>
       <div id="ai-log" class="ai-log"></div>
       <div class="form-row compact">
-        <input id="ai-input" placeholder="es. che tiri in porta mi consigli per la prossima giornata?"
+        <input id="ai-input" placeholder="es. qual è il pronostico della giornata?"
           onkeydown="if(event.key==='Enter')askAI(this.value)">
         <button class="cta" onclick="askAI(document.getElementById('ai-input').value)">Chiedi</button>
       </div>
@@ -831,6 +592,40 @@ async function askAI(question) {
   }
 }
 
+function renderSchedina() {
+  const el = document.getElementById("tab-schedina");
+  const s = state.data.schedina || {};
+  if (!s.round || !s.picks || !s.picks.length) {
+    el.innerHTML = `<div class="section-title">🎫 Schedina della giornata</div>
+      <div class="card muted">Nessuna schedina disponibile: viene creata prima della prima partita della giornata con gli esiti più probabili del modello.</div>`;
+    return;
+  }
+  const won = s.picks.filter(p => p.result === "win").length;
+  const lost = s.picks.filter(p => p.result === "loss").length;
+  const rows = s.picks.map(p => {
+    const st = p.result === "win" ? "✅" : p.result === "loss" ? "❌" : "⏳";
+    const pct = ((p.prob || 0) * 100).toFixed(0) + "%";
+    const score = p.score ? `  ${p.score}` : "";
+    return `<div class="card"><div class="kv"><span>${esc(p.home)} - ${esc(p.away)}${score}</span>
+      <span class="chip">${st}</span></div>
+      <div class="muted">${esc(p.pick)} @ ${fmtOdds(p.odds)} · prob. ${pct}${p.edge != null ? " · edge " + (p.edge * 100).toFixed(0) + "%" : ""}</div></div>`;
+  }).join("");
+  const hist = (s.history || []).slice().reverse().map(h =>
+    `<div class="card" style="padding:8px 14px"><div class="kv">
+       <span>Giornata ${h.round}</span>
+       <span class="muted">${h.wins} vinti · ${h.losses} persi</span></div></div>`).join("");
+  el.innerHTML = `<div class="section-title">🎫 Schedina della giornata ${s.round || "?"}</div>
+    <div class="grid3">
+      <div class="card"><div class="big-num">${won}/${s.picks.length}</div>
+        <div class="muted">eventi vinti</div></div>
+      <div class="card"><div class="big-num">${lost}/${s.picks.length}</div>
+        <div class="muted">eventi persi</div></div>
+      <div class="card"><div class="big-num">${s.picks.length}</div>
+        <div class="muted">esiti totali</div></div>
+    </div>${rows}
+    ${hist ? `<div class="section-title" style="margin-top:20px">📚 Schedine passate</div>${hist}` : ""}`;
+}
+
 function renderAI() {
   initAI();
 }
@@ -870,10 +665,10 @@ function renderActive() {
   if (name === "matches") renderMatches();
   else if (name === "results") { renderResults(); refreshLive(); }
   else if (name === "tracking") renderTracking();
+  else if (name === "schedina") renderSchedina();
   else if (name === "ai") renderAI();
   else if (name === "errors") renderErrors();
   else if (name === "standings") renderStandings();
-  else if (name === "manual") renderManual();
   else if (name === "sources") renderSources();
 }
 
@@ -891,8 +686,5 @@ async function poll() {
 poll();
 setInterval(poll, REFRESH_MS);
 setInterval(refreshLive, LIVE_REFRESH_MS);
-setInterval(() => {
-  if (document.querySelector("#tabs button.active").dataset.tab === "manual") refreshManualList();
-}, 10000);
 renderTunnel();
 setInterval(renderTunnel, 15000);

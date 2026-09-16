@@ -12,8 +12,7 @@ T = {
     "it": {
         "menu_title": ("📊 Serie A Stats — tutto gratis, ogni giorno\n\n"
                        "⚽ Classifica, partite, risultati e LIVE\n"
-                       "💰 Pronostici del modello (1X2 · Over/Under · BTTS)\n"
-                       "✨ Tiri in porta, giocatori e analisi squadre\n\n"
+                       "💰 Pronostici del modello (1X2 · Over/Under · BTTS)\n\n"
                        "Tocca un bottone qui sotto oppure scrivimi una domanda "
                        "libera (es. \"chi vince Inter - Milan?\")."),
         "menu_classifica": "🏆 Classifica",
@@ -21,9 +20,7 @@ T = {
         "menu_risultati": "📋 Risultati",
         "menu_live": "🔴 LIVE",
         "menu_pronostici": "💰 Pronostici",
-        "menu_tiri": "🎯 Tiri in porta",
-        "menu_tirigiocatori": "✨ Tiri giocatori",
-        "menu_arbitri": "👮 Arbitri",
+        "menu_schedina": "🎫 Schedina giornata",
         "menu_tracking": "📊 Onestà modello",
         "menu_segui": "🔔 Segui squadra",
         "menu_stopsegui": "🔕 Ferma follow",
@@ -50,11 +47,7 @@ T = {
         "live_title": "🔴 LIVE Serie A",
         "live_nodata": ("Nessun match live in questo momento.\n"
                         "Usa 📋 Risultati per vedere le ultime giornate."),
-        "shots_title": "✨ Tiri in porta giocatori (giornata {r}):",
-        "shots_nodata": "Nessun dato sui tiri dei giocatori disponibile.",
-        "shots_player": "  • {name} {avg} a gara ({played} g) · 💥 {threat}/10 · Over1,5 @{o15}",
         "menu_morale": "🎭 Morale & conferenze",
-        "menu_marcatori": "⚽ Marcatori",
         "morale_title": "🎭 Morale pre-partita (giornata {r}):",
         "morale_nodata": "Nessun dato sul morale disponibile.",
         "pronostici_note": "🎯 Centratura modello: {hit}/{tot} pronostici valutati ({rate:.0f}%).",
@@ -81,18 +74,21 @@ T = {
         "market_btts": "Entrambe a segno",
         "pronostico_pick": "Pronostico del modello: {pick} ({pct:.0f}%)",
         "pronostico_exact": "Risultato esatto più probabile: {score} ({pct:.0f}%)",
-        "pronostico_saves": "🧤 {gk} ({team}): ~{exp} parate · Over {thr:g} @{fair} ({pct:.0f}%)",
         "pronostico_tipster": "🔁 Voce esterna {src} (affid. {rate}): 1X2 {o} · O/U {g} · {s}",
-        "pronostico_xg": "xG reali: {home} {hf}↔{ha} · {away} {af}↔{aa}",
         "don_title": ("⭐ Sostieni Serie A Stats\n\n"
                       "Scegli un importo in Telegram Stars.\n"
                       "Ogni stella aiuta a mantenere il bot sempre attivo. Grazie!"),
         "don_thanks": "🙏 Grazie mille per il supporto! ({stars} ⭐)",
         "ai_thinking": "⏳ Analizzo i dati…",
-        "marcatori_title": "⚽ Probabilità marcatori (giornata {r}):",
-        "marcatori_nodata": "Nessun dato marcatori disponibile.",
-        "marcatori_player": "  • {name} ({pos}) · {prob}% · {goals} gol ultime {matches} gare · SOT: {sot}",
-        "marcatori_opp": "Difesa avversaria: {opp} gol subiti a gara",
+        "schedina_title": "🎫 SCHEDINA GIORNATA {r}",
+        "schedina_nodata": "Nessuna schedina ancora pronta: la creo prima della prima partita della giornata.",
+        "schedina_win": "✔ {pick} @ {odds}  [{pct:.0f}%]  {score} ✅",
+        "schedina_loss": "✘ {pick} @ {odds}  [{pct:.0f}%]  {score} ❌",
+        "schedina_pending": "◻ {pick} @ {odds}  [{pct:.0f}%]  ⏳",
+        "schedina_counter": "Combinata: {wins} vinti · {losses} persi",
+        "schedina_history_title": "📚 Schedine passate:",
+        "schedina_history_row": "Giornata {r}: {wins} vinti · {losses} persi",
+        "schedina_match": "{home} - {away}",
     },
 }
 

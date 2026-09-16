@@ -247,7 +247,6 @@ class EspnClient:
             "status": _status_name(s.get("name")),
             "home_score": ht.get("score"),
             "away_score": at.get("score"),
-            "referee": {},
         }
 
     def team_events(self, team_id, max_events=40):
@@ -318,7 +317,6 @@ class EspnClient:
             away=detail.get("away", row[2]), home_id=row[3], away_id=row[4],
             start_ts=row[5], round=row[6] or detail.get("round"),
             venue=detail.get("venue", ""), status=detail.get("status", ""),
-            referee=detail.get("referee", {}),
         )
         fx.odds = self.odds_to_picks(row[0])
         return fx

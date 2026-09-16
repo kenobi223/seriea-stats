@@ -28,8 +28,7 @@ log = logging.getLogger("telegram")
 API = "https://api.telegram.org/bot{token}/{method}"
 MAX_MSG = 4096
 
-INTENTS = {"pronostici": "pronostici", "tiri": "tiri in porta",
-           "arbitri": "arbitri"}
+INTENTS = {"pronostici": "pronostici"}
 MARKET_KEY = {"1x2": "market_1x2", "over_under": "market_over_under",
               "btts": "market_btts"}
 
@@ -130,25 +129,6 @@ def _giornata_text(tr, fixtures):
         es = (p.get("exact_score") or [])
         if es:
             line += (f"\n   {tr._t('pronostico_exact', score=es[0]['score'], pct=es[0]['prob'] * 100)}")
-        xg = p.get("xg") or {}
-        if xg.get("enabled"):
-            line += "\n   " + tr._t(
-                "pronostico_xg", home=fx.get("home"),
-                hf=xg.get("home_for"), ha=xg.get("home_ag"),
-                away=fx.get("away"), af=xg.get("away_for"),
-                aa=xg.get("away_ag"))
-        ks = fx.get("keeper_saves") or {}
-        for side in ("home", "away"):
-            b = ks.get(side)
-            if not b or not b.get("pick"):
-                continue
-            team = fx.get("home") if side == "home" else fx.get("away")
-            gk = b.get("gk") or team
-            exp = b.get("expected", b.get("avg"))
-            thr = b.get("threshold")
-            fair = b.get("fair_over") or "-"
-            op = (b.get("over_prob") or 0) * 100
-            line += f"\n   {tr._t('pronostico_saves', gk=gk, team=team, exp=exp, thr=thr, fair=fair, pct=op)}"
         tp = p.get("tipster_mix")
         if tp:
             rate = f"{tp['rate'] * 100:.0f}%" if tp.get("rate") is not None else "n/d"
@@ -201,34 +181,6 @@ def _live_text(tr, live):
     return "\n".join(lines)
 
 
-def _shots_text(tr, fixtures):
-    if not fixtures:
-        return tr._t("shots_nodata")
-    rnd = fixtures[0].get("round")
-    lines = [tr._t("shots_title", r=rnd), ""]
-    for fx in fixtures[:12]:
-        ps = fx.get("player_shots") or {}
-        home, away = ps.get("home") or [], ps.get("away") or []
-        if not home and not away:
-            continue
-        lines.append(f"{fx.get('home')} - {fx.get('away')}")
-        for name, rows in ((fx.get("home"), home), (fx.get("away"), away)):
-            block = [f"  {name}:"]
-            if not rows:
-                block.append("  · -")
-            else:
-                block += [tr._t("shots_player",
-                                name=r["name"], avg=f"{r['avg']:.2f}",
-                                played=r["played"],
-                                threat=r.get("threat") or 0,
-                                o15="—" if r.get("fair_o15") is None
-                                else f"{r['fair_o15']:.2f}")
-                          for r in rows[:6]]
-            lines.append("\n".join(block))
-        lines.append("")
-    return "\n".join(lines).rstrip() or tr._t("shots_nodata")
-
-
 def _morale_text(tr, fixtures):
     if not fixtures:
         return tr._t("morale_nodata")
@@ -251,39 +203,6 @@ def _morale_text(tr, fixtures):
                 lines.append(quote)
         lines.append("")
     return "\n".join(lines).rstrip() or tr._t("morale_nodata")
-
-
-def _marcatori_text(tr, fixtures):
-    if not fixtures:
-        return tr._t("marcatori_nodata")
-    lines = [tr._t("marcatori_title", r=fixtures[0].get("round")), ""]
-    for fx in fixtures[:12]:
-        sc = fx.get("scorer_probabilities") or {}
-        home, away = sc.get("home") or [], sc.get("away") or []
-        if not home and not away:
-            continue
-        lines.append(f"{fx.get('home')} - {fx.get('away')}")
-        opp_h = fx.get("form_away") or {}
-        opp_a = fx.get("form_home") or {}
-        for side, rows, name, opp_form in (
-            ("home", home, fx.get("home"), opp_h),
-            ("away", away, fx.get("away"), opp_a),
-        ):
-            block = [f"  {name}:"]
-            if not rows:
-                block.append("  · -")
-            else:
-                for r in rows[:3]:
-                    block.append(
-                        tr._t("marcatori_player",
-                              name=r["name"], pos=r.get("position") or "?",
-                              prob=f"{r['prob_pct']:.1f}",
-                              goals=r.get("goals_last5", 0),
-                              matches=r.get("matches_last5", 0),
-                              sot=r.get("avg_sot", 0)))
-            lines.append("\n".join(block))
-        lines.append("")
-    return "\n".join(lines).rstrip() or tr._t("marcatori_nodata")
 
 
 def _tracking_text(tr, tracking):
@@ -309,9 +228,6 @@ def _tracking_text(tr, tracking):
             lines.append(f"· Pronostico modello (1X2/Over/BTTS): "
                          f"{tracking['picks_hit']}/{tracking['picks_total']} "
                          f"({tracking['picks_rate'] * 100:.0f}%)")
-    if tracking.get("saves_total"):
-        lines.append(f"· 🧤 Parate: {tracking['saves_hit']}/{tracking['saves_total']} "
-                     f"({tracking['saves_rate'] * 100:.0f}%)")
     if tracking.get("brier") is not None:
         lines.append(tr._t("tracking_brier", b=tracking["brier"]))
     if tracking.get("rps") is not None:
@@ -350,6 +266,40 @@ def _pronostici_note(tr, tracking):
                  tot=total, rate=tracking["bets_rate"] * 100)
 
 
+def _schedina_text(tr, slip):
+    if not slip or not slip.get("picks"):
+        return tr._t("schedina_nodata")
+    lines = [tr._t("schedina_title", r=slip.get("round") or "?"), ""]
+    for p in (slip.get("picks") or []):
+        pick = p.get("pick") or "?"
+        odds = p.get("odds") or 0
+        pct = (p.get("prob") or 0) * 100
+        score = p.get("score") or ""
+        lines.append(tr._t("schedina_match", home=p.get("home"),
+                           away=p.get("away")))
+        if p.get("result") == "win":
+            lines.append("   " + tr._t("schedina_win", pick=pick, odds=odds,
+                                       pct=pct, score=score))
+        elif p.get("result") == "loss":
+            lines.append("   " + tr._t("schedina_loss", pick=pick, odds=odds,
+                                       pct=pct, score=score))
+        else:
+            lines.append("   " + tr._t("schedina_pending", pick=pick, odds=odds,
+                                       pct=pct))
+    wins = sum(1 for p in slip.get("picks", []) if p.get("result") == "win")
+    losses = sum(1 for p in slip.get("picks", []) if p.get("result") == "loss")
+    lines.append("")
+    lines.append(tr._t("schedina_counter", wins=wins, losses=losses))
+    hist = slip.get("history") or []
+    if hist:
+        lines.append("")
+        lines.append(tr._t("schedina_history_title"))
+        for h in reversed(hist):
+            lines.append(tr._t("schedina_history_row", r=h.get("round"),
+                               wins=h.get("wins", 0), losses=h.get("losses", 0)))
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------- tastiere
 def _kb(rows):
     return {"inline_keyboard": [
@@ -363,12 +313,9 @@ def _menu_kb(tr):
         [(tr._t("menu_risultati"), "p:risultati"),
          (tr._t("menu_live"), "p:live")],
         [(tr._t("menu_pronostici"), "p:pronostici"),
-         (tr._t("menu_tiri"), "p:tiri"),
-         (tr._t("menu_tirigiocatori"), "p:shots")],
-        [(tr._t("menu_arbitri"), "p:arbitri"),
          (tr._t("menu_morale"), "p:morale"),
-         (tr._t("menu_marcatori"), "p:marcatori")],
-        [(tr._t("menu_tracking"), "p:tracking")],
+         (tr._t("menu_tracking"), "p:tracking")],
+         [(tr._t("menu_schedina"), "p:schedina")],
         [(tr._t("menu_segui"), "flw"),
          (tr._t("menu_stopsegui"), "unf")],
         [(tr._t("menu_donazioni"), "don"),
@@ -472,14 +419,12 @@ class TelegramBot:
             return _risultati_text(tr, self.store.get("results", []))
         if section == "live":
             return _live_text(tr, self.store.get("live") or {})
-        if section == "shots":
-            return _shots_text(tr, self.store.get("fixtures", []))
         if section == "morale":
             return _morale_text(tr, self.store.get("fixtures", []))
-        if section == "marcatori":
-            return _marcatori_text(tr, self.store.get("fixtures", []))
         if section == "tracking":
             return _tracking_text(tr, self.store.get("tracking", {}))
+        if section == "schedina":
+            return _schedina_text(tr, self.store.get("schedina") or {})
         if section in INTENTS:
             result = answer(INTENTS[section], self.store.get("fixtures", []))
             return _render(result)
@@ -489,7 +434,7 @@ class TelegramBot:
         tr = Tr(chat_id)
         text = self._section_text(tr, section)
         kb = _menu_kb(tr)
-        if section in ("pronostici", "tiri", "shots"):
+        if section in ("pronostici",):
             note = _pronostici_note(tr, self.store.get("tracking", {}))
             if note and "\n\n" not in text:
                 text += "\n\n" + note
@@ -621,9 +566,6 @@ class TelegramBot:
             "  · <Allenatore> e <data> opzionali (default: oggi)\n"
             "  es. /capo coach add Fiorentina|Mario Rossi|12/09/2026\n"
             "/capo coach del <Squadra>\n\n"
-            "📊 QUOTE MANUALI (tiri giocatore ecc.):\n"
-            "/capo quota <Casa>|<Trasferta>|<Mercato>|<Esito>|<Bookmaker>|<Quota>\n"
-            "  es. /capo quota Juventus|AC Milan|Tiri in porta|Lautaro Martinez|sisal|1.80\n\n"
             "🎟️ ABBONAMENTI:\n"
             "/capo coupon <CODICE> — crea un voucher\n"
             "/capo regala <chat_id> — completo a VITA a quella chat"
@@ -646,10 +588,8 @@ class TelegramBot:
                 lines.append(f"  · {name}: {mgr}{when}{new}")
         else:
             lines.append("🔁 Nessun allenatore registrato.")
-        manual = kv.read_json("manual_odds.json", default=[])
         coupon_n = len(subs._extra_coupons())
-        lines.append(f"\n📊 Quote manuali: {len(manual)}")
-        lines.append(f"🎟️ Coupon del capo: {coupon_n}")
+        lines.append(f"\n🎟️ Coupon del capo: {coupon_n}")
         lines.append(
             f"\nNota: le modifiche valgono dal prossimo ciclo "
             f"(ogni {config.UPDATE_INTERVAL_SECONDS // 60} min) "
@@ -791,40 +731,6 @@ class TelegramBot:
             lines.append(f"  · {name}: {mgr}{when}{new}")
         return "\n".join(lines)
 
-    def _capo_quota(self, chat_id, arg):
-        from app.core import kv
-        tr = Tr(chat_id)
-        fields = [f.strip() for f in arg.split("|")]
-        if len(fields) != 6:
-            self._send(chat_id,
-                       "Formato: /capo quota Casa|Trasferta|Mercato|Esito|Bookmaker|Quota\n"
-                       "es. Juventus|AC Milan|Tiri in porta|Lautaro Martinez|sisal|1.80",
-                       _menu_kb(tr))
-            return
-        home, away, market, pick, source, quota = fields
-        try:
-            odds = float(quota.replace(",", "."))
-        except ValueError:
-            self._send(chat_id, f"⚠️ Quota '{quota}' non è un numero.",
-                       _menu_kb(tr))
-            return
-        entry = {"home": home, "away": away, "market": market, "pick": pick,
-                 "source": source, "odds": odds}
-        manual = kv.read_json("manual_odds.json", default=[])
-        if not isinstance(manual, list):
-            manual = []
-        for e in manual:
-            if all(e.get(k) == v for k, v in entry.items()):
-                self._send(chat_id, "ℹ️ Quota già presente, niente da fare.",
-                           _menu_kb(tr))
-                return
-        manual.append(entry)
-        kv.write_json("manual_odds.json", manual)
-        self._send(chat_id,
-                   f"✅ Quota manuale aggiunta ({len(manual)} totali):\n"
-                   f"  {home} - {away}\n  {market} · {pick}\n  {source} @{odds}",
-                   _menu_kb(tr))
-
     def _capo_coupon(self, chat_id, arg):
         tr = Tr(chat_id)
         code = arg.strip().strip()
@@ -879,9 +785,6 @@ class TelegramBot:
         elif action == "coach":
             nxt = rest.split(" ", 1)[1].strip() if " " in rest else ""
             self._capo_coach(chat_id, nxt)
-        elif action == "quota":
-            nxt = rest.split(" ", 1)[1].strip() if " " in rest else ""
-            self._capo_quota(chat_id, nxt)
         elif action == "coupon":
             nxt = rest.split(" ", 1)[1].strip() if " " in rest else ""
             self._capo_coupon(chat_id, nxt)
@@ -969,21 +872,17 @@ class TelegramBot:
             self._send(chat_id,
                        _tracking_text(tr, self.store.get("tracking", {})),
                        _menu_kb(tr))
-        elif text.startswith("/marcatori") or text.startswith("/gol"):
+        elif text.startswith("/schedina"):
             tr = Tr(chat_id)
             self._send(chat_id,
-                       _marcatori_text(tr, self.store.get("fixtures", [])),
+                       _schedina_text(tr, self.store.get("schedina") or {}),
                        _menu_kb(tr))
-        elif text.startswith("/pronostici") or text.startswith("/bet") \
-                or text.startswith("/tiri") or text.startswith("/arbitri"):
-            cmd = q.split(" ")[0].lstrip("/")
-            intent = {"tiri": "tiri in porta", "arbitri": "arbitri",
-                      "pronostici": "pronostici"}.get(cmd, "pronostici")
+        elif text.startswith("/pronostici") or text.startswith("/bet"):
             tr = Tr(chat_id)
-            result = answer(intent, self.store.get("fixtures", []))
+            result = answer("pronostici", self.store.get("fixtures", []))
             body = _render(result)
             note = _pronostici_note(tr, self.store.get("tracking", {}))
-            if note and intent in ("pronostici", "tiri"):
+            if note:
                 body += "\n\n" + note
             self._send(chat_id, body, _menu_kb(tr))
         elif text.startswith("/ask"):

@@ -3,10 +3,6 @@
 Fonte            stagione classifica risultati partite live quote 1X2 analisi
 sofascore           si       si        si       si    si     si        si
 espn                si       si        si       si    si(punteggi) si(1X2) no
-
-Le "analisi" (lineups, incidenti, statistiche, arbitri, h2h, forma, xG…)
-riguardano soltanto l'engine sofascore: se nelle fonti non c'e', quei metodi
-rispondono con un default vuoto e le feature affinate degradano.
 """
 import logging
 
@@ -20,13 +16,6 @@ _CORE = {
     "resolve_season", "standings", "next_fixtures", "build_fixture",
     "event_detail", "odds_to_picks", "event_odds", "season_results",
     "live_events", "team_events",
-}
-# Solo il motore sofascore (lineups/stat/info profondi) li fornisce.
-_ANALYTICS_EMPTY = {
-    "lineups": None, "probable_xi": None, "statistics": {},
-    "team_injuries": [], "referee_events": [],
-    "collect_past_matches": [], "stats_for_events": {},
-    "incidents_for_events": {}, "incidents": [],
 }
 
 
@@ -79,10 +68,4 @@ class FootballClient:
             raise AttributeError(name)
         if name in _CORE:
             return lambda *args, **kwargs: self._pick(name, *args, **kwargs)
-        if name in _ANALYTICS_EMPTY:
-            engine = self._sofascore
-            if engine is None:
-                log.warning("%s: motore sofascore assente tra le fonti", name)
-                return lambda *args, **kwargs: _ANALYTICS_EMPTY[name]
-            return getattr(engine, name)
         raise AttributeError(name)

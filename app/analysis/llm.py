@@ -4,8 +4,7 @@ Usa la stessa API della sessione opencode (chiave salvata in
 ~/.local/share/opencode/auth.json oppure env OPENCODE_API_KEY).
 Risponde SOLO sulla Serie A, attingendo ESCLUSIVAMENTE dai dati raccolti:
 
-  classifica, prossime partite, pronostici del modello, tiri in porta,
-  errori di quota, arbitri.
+  classifica, prossime partite, pronostici del modello, errori di quota.
 
 Se la chiave manca oppure la chiamata fallisce ritorna None e il chiamante
 ricade sull'assistente a parole chiave.
@@ -87,9 +86,6 @@ def _build_context(standings, fixtures):
         for flag in (fx.get("value_flags") or [])[:2]:
             if flag.get("kind") in ("spread", "arb"):
                 lines.append(f"  Errore di quota: {flag.get('message')}")
-        ref = fx.get("referee") or {}
-        if ref.get("name"):
-            lines.append(f"  Arbitro: {ref.get('name')}")
         mot = p.get("motivation")
         if mot:
             lines.append(f"  Motivazione: {mot[:350]}")

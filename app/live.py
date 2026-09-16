@@ -198,18 +198,6 @@ class LiveMonitor:
         goals = [(kind, m, old) for kind, m, old in changed if kind == "goal"]
         starts = [(kind, m, old) for kind, m, old in changed if kind == "start"]
 
-        # marcatori solo al cambio risultato (piccoli: max 1 richiesta/partita)
-        scorers = {}
-        if goals:
-            ids = {m["id"] for _, m, _ in goals}
-            for eid in ids:
-                try:
-                    scorers[eid] = self._goal_incidents(self._get_client(), eid,
-                                                        goals)
-                except Exception as e:
-                    log.debug("incidenti live %s: %s", eid, e)
-                    scorers[eid] = {}
-
         for _, m, _ in starts:
             notify_team(m["home"], f"🔴 In diretta! {m['home']} - {m['away']} {_live_score(m)} ({m['period'].lower()})")
             notify_team(m["away"], f"🔴 In diretta! {m['home']} - {m['away']} {_live_score(m)} ({m['period'].lower()})")
@@ -221,39 +209,11 @@ class LiveMonitor:
                         f"🏁 FINALE: {m['home']} {m.get('hs')}-{m.get('as')} {m['away']}")
 
         for _, m, _ in goals:
-            s = scorers.get(m["id"], {})
-            scorer = s.get("player") or ""
-            minute = m.get("minute") or s.get("minute") or "?"
-            suffix = f" ({scorer})" if scorer else ""
+            minute = m.get("minute") or "?"
             notify_team(m["home"],
-                        f"⚽ GOL! {m['home']} {m.get('hs')}-{m.get('as')} {m['away']} · {minute}'{suffix}")
+                        f"⚽ GOL! {m['home']} {m.get('hs')}-{m.get('as')} {m['away']} · {minute}'")
             notify_team(m["away"],
-                        f"⚽ GOL! {m['home']} {m.get('hs')}-{m.get('as')} {m['away']} · {minute}'{suffix}")
-
-    def _goal_incidents(self, client, event_id, goals):
-        """Mappa team -> marcatore del gol per l'evento live."""
-        m = next((mm for _, mm, _ in goals if mm["id"] == event_id), None)
-        if not m:
-            return {}
-        before = next((old for _, mm, old in goals if mm["id"] == event_id and old), {})
-        delta_home = (m.get("hs") or 0) - (before.get("hs") or 0)
-        delta_away = (m.get("as") or 0) - (before.get("as") or 0)
-        inc = client.incidents(event_id)
-        out = {}
-        for i in reversed(inc):
-            if i.get("type") != "goal":
-                continue
-            is_home = i.get("team_id") == m["home_id"]
-            is_away = i.get("team_id") == m["away_id"]
-            if is_home and delta_home > 0:
-                out = {"player": i.get("player"), "team": m["home"],
-                       "minute": i.get("minute")}
-                break
-            if is_away and delta_away > 0:
-                out = {"player": i.get("player"), "team": m["away"],
-                       "minute": i.get("minute")}
-                break
-        return out
+                        f"⚽ GOL! {m['home']} {m.get('hs')}-{m.get('as')} {m['away']} · {minute}'")
 
 
 def _live_score(m):

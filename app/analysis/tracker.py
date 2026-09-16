@@ -128,44 +128,6 @@ def _outcome(home, away):
     }
 
 
-def _saves_outcome(record, client):
-    """Confronta i pick sulle parate coi numeri reali (esito per lato).
-
-    Un pick "over 2.5 parate" è centrato se le parate reali del portiere
-    (dalla statistica squadra della partita) sono >= soglia.
-    """
-    picks = record.get("saves_picks") or []
-    if not picks:
-        return None
-    try:
-        stats = client._cached(f"stats-{record['id']}",
-                               lambda: client.statistics(record["id"]))
-    except Exception as e:
-        log.debug("saves outcome %s: %s", record.get("id"), e)
-        return None
-    if not stats:
-        return None
-    out = {}
-    for p in picks:
-        side = p.get("side")
-        block = (stats.get(side) or {})
-        actual = block.get("goalkeeper_saves")
-        if actual is None:
-            actual = block.get("total_saves")
-        if actual is None:
-            continue
-        try:
-            actual = int(actual)
-        except (TypeError, ValueError):
-            continue
-        thr = p.get("threshold") or 3.0
-        out[side] = {"team": p.get("team"), "gk": p.get("gk"),
-                     "pick": p.get("pick"), "threshold": thr,
-                     "actual": actual,
-                     "hit": int(actual >= thr)}
-    return out or None
-
-
 def _clamp(v):
     return max(CLAMP[0], min(CLAMP[1], v))
 
@@ -228,19 +190,6 @@ def record(fixtures):
             picks.append({"market": market, "pick": mp["key"],
                           "prob": mp.get("prob"), "odds": mp.get("odds"),
                           "conf": mp.get("conf")})
-        saves_picks = []
-        for side in ("home", "away"):
-            sb = (getattr(fx, "keeper_saves", {}) or {}).get(side)
-            if sb and sb.get("pick"):
-                saves_picks.append({
-                    "side": side, "team": sb.get("team"),
-                    "pick": sb.get("pick"), "gk": sb.get("gk"),
-                    "threshold": sb.get("threshold"),
-                    "prob": sb.get("over_prob"),
-                    "fair": sb.get("fair_over"),
-                    "expected": sb.get("expected"),
-                    "played": sb.get("played"),
-                })
         data["records"].append({
             "id": fxid, "home": home, "away": away,
             "start_ts": start_ts or 0, "round": rnd,
@@ -249,7 +198,6 @@ def record(fixtures):
             "market_probs": preds.get("market_probs") or {},
             "bets": bets,
             "picks": picks,
-            "saves_picks": saves_picks,
             "tipsters": preds.get("tipsters"),
             "evaluated": False, "result": None,
             "tipsters_evaluated": False,
@@ -302,7 +250,6 @@ def evaluate(client, force_ids=None):
             continue
         r["result"] = {"home_score": hs, "away_score": as_,
                        **{m: _outcome(hs, as_)[m] for m in MARKETS}}
-        r["saves_result"] = _saves_outcome(r, client)
         r["evaluated"] = True
         r["evaluated_at"] = int(now)
         changed += 1
@@ -462,7 +409,7 @@ def walk_forward():
     applicano alle probabilità emesse e si misura l'onestà raggiunta:
 
       * Brier "prima" (probabilità pubblicate) vs "dopo" (ri-calibrate);
-      * tasso di centratura di pronostici/pick/parate in modalità OOS.
+      * tasso di centratura di pronostici/pick in modalità OOS.
 
     La differenza dice se l'autocorrezione vale davvero out-of-sample o se
     il modello si stava "allenando" sui risultati che andava a prevedere.
@@ -540,10 +487,9 @@ def walk_forward():
 
 
 def _oos_bet_stats(records):
-    """Centratura OOS di pronostici/pick/parate (solo con storia precedente)."""
+    """Centratura OOS di pronostici/pick (solo con storia precedente)."""
     stats = {"bets": {"total": 0, "hit": 0, "rate": None},
-             "picks": {"total": 0, "hit": 0, "rate": None},
-             "saves": {"total": 0, "hit": 0, "rate": None}}
+             "picks": {"total": 0, "hit": 0, "rate": None}}
     for r in records:
         prior = _prior_records(records, r)
         if not prior:
@@ -559,9 +505,6 @@ def _oos_bet_stats(records):
             if mkt in MARKETS and mkt in res:
                 stats["picks"]["total"] += 1
                 stats["picks"]["hit"] += int(pi.get("pick") == res[mkt])
-        for rec in (r.get("saves_result") or {}).values():
-            stats["saves"]["total"] += 1
-            stats["saves"]["hit"] += int(bool(rec.get("hit")))
     for k in stats:
         if stats[k]["total"]:
             stats[k]["rate"] = round(stats[k]["hit"] / stats[k]["total"], 3)
@@ -662,17 +605,6 @@ def analyze():
     tracking["match_picks_rate"] = (match_picks_hit / match_picks_total
                                     if match_picks_total else None)
 
-    # ---- centratura dei pronostici sulle parate dei portieri
-    saves_total = saves_hit = 0
-    for r in records:
-        sr = r.get("saves_result") or {}
-        for rec in sr.values():
-            saves_total += 1
-            saves_hit += int(bool(rec.get("hit")))
-    tracking["saves_total"] = saves_total
-    tracking["saves_hit"] = saves_hit
-    tracking["saves_rate"] = (saves_hit / saves_total if saves_total else None)
-
     # ---- calibrazione: probabilità predetta vs esito reale per ogni esito
     calibration, top_picks, brier = _fit_calibration(records)
     tracking["brier"] = brier
@@ -742,10 +674,6 @@ def analyze():
         conclusions.append(
             f"Pronostico modello su {lbl[m]}: {st['picks_hit']}/{st['picks_total']} "
             f"({st['picks_rate'] * 100:.0f}%).")
-    if tracking.get("saves_total"):
-        conclusions.append(
-            f"Parate dei portieri: {tracking['saves_hit']}/{tracking['saves_total']} "
-            f"({tracking['saves_rate'] * 100:.0f}%).")
     for tp in top_picks:
         if tp["factor"] is not None:
             per = tp["factor"] * 100

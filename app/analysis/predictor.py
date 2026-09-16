@@ -65,7 +65,7 @@ def _result_pts(entries, for_team=True):
     return pts, count
 
 
-def _team_rating(row, league_avg, xg=None, league_xg=None):
+def _team_rating(row, league_avg):
     """Attacco e difesa per partita dalla classifica, regolarizzati.
 
     A inizio stagione il campione è minuscolo (2-4 giornate): le stime grezze
@@ -73,12 +73,6 @@ def _team_rating(row, league_avg, xg=None, league_xg=None):
     "gioca" anche ``REGULARIZATION_PRIOR`` partite virtuali a livello della
     media del campionato, che tirano i valori verso il centro finché il
     campione reale non cresce (shrinkage bayesiano).
-
-    Se i gol attesi (``xg``) sono disponibili, vengono fusi nella valutazione
-    (``XG_BLEND_WEIGHT``): lo xG è un segnale meno rumoroso dei gol reali su
-    campioni piccoli e rende le lambda del Poisson più stabili. I valori xG
-    vengono prima scalati alla media-gol del campionato (la scala degli xG è
-    ~simile a quella dei gol ma vanno allineati prima di mescolare).
     """
     gf = row.get("gf") or 0
     ga = row.get("ga") or 0
@@ -87,19 +81,6 @@ def _team_rating(row, league_avg, xg=None, league_xg=None):
     p = max(played, 1)
     att = (gf + league_avg["scored"] * prior) / (p + prior)
     deff = (ga + league_avg["conceded"] * prior) / (p + prior)
-
-    if xg and config.XG_ENABLED:
-        xgf = xg.get("xg_for")
-        xga = xg.get("xg_ag")
-        scale_s = (league_avg["scored"] / league_xg["scored"]
-                   if league_xg and league_xg.get("scored") else 1.0)
-        scale_c = (league_avg["conceded"] / league_xg["conceded"]
-                   if league_xg and league_xg.get("conceded") else 1.0)
-        w = config.XG_BLEND_WEIGHT
-        if xgf is not None:
-            att = (1 - w) * att + w * (xgf * scale_s)
-        if xga is not None:
-            deff = (1 - w) * deff + w * (xga * scale_c)
     return att, deff
 
 
@@ -175,14 +156,12 @@ def _home_away_avg(form):
 
 
 def predict_fixture(fx, standings_map, league_avg, calibration=None,
-                    tipster_registry=None, team_xg=None, league_xg=None):
+                    tipster_registry=None):
     """Ritorna dict predictions per il fixture.
 
     Se ``calibration`` (dal tracker) è presente, le probabilità vengono
     corrette in base agli errori storici del modello (più oneste) prima di
-    calcolare quote fair e migliori giocate. ``team_xg`` è la mappa
-    {team_id: tabella xG} di app/analysis/xg.py e ``league_xg`` le corrisp.
-    medie di campionato (scala xG ~ scala gol, usate per allineare i numeri).
+    calcolare quote fair e migliori giocate.
     """
     home_name, away_name = fx.home, fx.away
     probs = {}
@@ -192,12 +171,8 @@ def predict_fixture(fx, standings_map, league_avg, calibration=None,
 
     home_row = standings_map.get(fx.home_id, {})
     away_row = standings_map.get(fx.away_id, {})
-    home_att, home_def = _team_rating(home_row, league_avg,
-                                      (team_xg or {}).get(fx.home_id),
-                                      league_xg)
-    away_att, away_def = _team_rating(away_row, league_avg,
-                                      (team_xg or {}).get(fx.away_id),
-                                      league_xg)
+    home_att, home_def = _team_rating(home_row, league_avg)
+    away_att, away_def = _team_rating(away_row, league_avg)
 
     hf = fx.form_home or {}
     af = fx.form_away or {}
@@ -260,14 +235,6 @@ def predict_fixture(fx, standings_map, league_avg, calibration=None,
         lmbda_h *= clamp(0.9, 1.1, 1 + (wh - wa) * 0.02)
         lmbda_a *= clamp(0.9, 1.1, 1 + (wa - wh) * 0.02)
 
-    # infortuni
-    n_inj_h = len(hf.get("injuries") or [])
-    n_inj_a = len(af.get("injuries") or [])
-    if n_inj_h >= 3:
-        lmbda_h *= 0.97
-    if n_inj_a >= 3:
-        lmbda_a *= 0.97
-
     # ---- nuovo allenatore ("new manager bounce")
     # Una squadra riorganizzata segna di più e concede di meno: il gol atteso
     # della squadra con nuova guida sale, quello dell'avversario scende.
@@ -280,19 +247,6 @@ def predict_fixture(fx, standings_map, league_avg, calibration=None,
         lmbda_h *= config.NEW_MANAGER_DEFENSE_MULT
 
     probs["lambdas"] = {"home_goals": round(lmbda_h, 3), "away_goals": round(lmbda_a, 3)}
-
-    # ---- digest xG per fixture (dashboard / bot / assistente)
-    xg_h = (team_xg or {}).get(fx.home_id) or {}
-    xg_a = (team_xg or {}).get(fx.away_id) or {}
-    probs["xg"] = {
-        "home_for": round(xg_h.get("xg_for") or 0, 2),
-        "home_ag": round(xg_h.get("xg_ag") or 0, 2),
-        "away_for": round(xg_a.get("xg_for") or 0, 2),
-        "away_ag": round(xg_a.get("xg_ag") or 0, 2),
-        "played_home": xg_h.get("played"),
-        "played_away": xg_a.get("played"),
-        "enabled": bool(xg_h and xg_a),
-    }
 
     grid = [[poisson_pmf(lmbda_h, i) * poisson_pmf(lmbda_a, j)
              for j in range(MAX_GOALS)] for i in range(MAX_GOALS)]
@@ -612,25 +566,6 @@ def _motivation(fx, home_row, away_row, hf, af, probs, best):
             f"{fx.away} {round(cs_a['gf'] / max(cs_a['giocate'], 1), 2)} fatti,"
             f" {round(cs_a['ga'] / max(cs_a['giocate'], 1), 2)} subiti.")
 
-    sH = hf.get("shots_avg")
-    sA = af.get("shots_avg")
-    if sH is not None and sA is not None:
-        parts.append(f"Tiri in porta: {fx.home} {sH} a gara, {fx.away} {sA} a gara.")
-
-    ref = fx.referee or {}
-    if ref.get("name"):
-        r = []
-        r.append(f"Arbitro: {ref['name']}")
-        if ref.get("games"):
-            r.append(f"media carriera {ref.get('yellow', 0) / ref['games']:.1f} gialli/"
-                     f"{ref.get('red', 0) / ref['games']:.2f} rossi a partita")
-        cY_h = hf.get("cards_y_avg")
-        cY_a = af.get("cards_y_avg")
-        extra = ""
-        if cY_h is not None and cY_a is not None:
-            extra = f" (squadre: {fx.home} {cY_h}, {fx.away} {cY_a} gialli/gara)"
-        parts.append(", ".join(r) + extra + ".")
-
     h2h = fx.h2h or []
     if h2h:
         wh = sum(1 for m in h2h if m.get("winner") == "H")
@@ -638,18 +573,6 @@ def _motivation(fx, home_row, away_row, hf, af, probs, best):
         wd = len(h2h) - wh - wa
         if len(h2h) >= 2:
             parts.append(f"Precedenti recenti ({len(h2h)}): {wh}V {fx.home}, {wd}N, {wa}V {fx.away}.")
-
-    inj_h = [i.get("player") for i in (hf.get("injuries") or [])]
-    inj_a = [i.get("player") for i in (af.get("injuries") or [])]
-    if inj_h or inj_a:
-        def short(lst):
-            return ", ".join(lst[:3]) + ("..." if len(lst) > 3 else "")
-        msgs = []
-        if inj_h:
-            msgs.append(f"{fx.home} senza: {short(inj_h)}")
-        if inj_a:
-            msgs.append(f"{fx.away} senza: {short(inj_a)}")
-        parts.append("Attenzione infortuni: " + "; ".join(msgs) + ".")
 
     ch = fx.coach or {}
     for team_name, side in ((fx.home, "home"), (fx.away, "away")):
@@ -667,31 +590,6 @@ def _motivation(fx, home_row, away_row, hf, af, probs, best):
     if lambdas:
         parts.append(f"Atteso dal modello: {fx.home} {lambdas['home_goals']:g} — "
                      f"{lambdas['away_goals']:g} {fx.away}.")
-
-    xg = probs.get("xg") or {}
-    if xg.get("enabled"):
-        xg_note = []
-        for team_label, form_side, base_key in (
-                (fx.home, hf, "home"), (fx.away, af, "away")):
-            gf_avg = None
-            seg = (form_side.get("current_season") or {})
-            if seg and seg.get("gf") is not None:
-                gf_avg = (seg.get("gf") or 0) / max(seg.get("giocate") or 1, 1)
-            xg_for = xg.get(f"{base_key}_for")
-            xg_ag = xg.get(f"{base_key}_ag")
-            bits = []
-            if xg_for is not None:
-                bits.append(f"xG {xg_for:.2f} a gara")
-            if xg_ag is not None:
-                bits.append(f"ne concede {xg_ag:.2f}")
-            if gf_avg is not None and xg_for and gf_avg - xg_for >= 0.2:
-                bits.append("(sopra i numeri: sta segnando più del dovuto)")
-            elif gf_avg is not None and xg_for and xg_for - gf_avg >= 0.2:
-                bits.append("(sotto i numeri: potrebbe segnare di più)")
-            if bits:
-                xg_note.append(f"{team_label}: {', '.join(bits)}")
-        if xg_note:
-            parts.append("Gol attesi: " + "; ".join(xg_note) + ".")
 
     es = probs.get("exact_score") or []
     if es:

@@ -12,7 +12,7 @@ import threading
 import requests
 
 import config
-from app.analysis import tracker
+from app.analysis import schedina
 from app.core import kv
 
 log = logging.getLogger("notify")
@@ -84,9 +84,11 @@ def _caption(win):
     return "\n".join(lines)
 
 
-def send_pending_wins():
-    """Foto a tutte le chat avviate, per ogni best-bet appena indovinato."""
-    wins = tracker.pending_wins()
+def send_pending_wins(store=None):
+    """Foto a tutte le chat avviate, per ogni esito della schedina vinto."""
+    if store is None:
+        return
+    wins = schedina.pending_wins(store)
     if not wins:
         return
     started = load_started()
@@ -98,7 +100,7 @@ def send_pending_wins():
     if not os.path.exists(config.WIN_PHOTO):
         log.warning("manca %s: notifica pronostici disattivata",
                     config.WIN_PHOTO)
-        tracker.mark_wins_notified([w["id"] for w in wins])
+        schedina.mark_wins_notified(store, [w["id"] for w in wins])
         return
     for w in wins:
         caption = _caption(w)
@@ -106,7 +108,7 @@ def send_pending_wins():
         for chat in started:
             if _send_photo(chat, config.WIN_PHOTO, caption):
                 sent += 1
-        tracker.mark_wins_notified([w["id"]])
-        log.info("pronostico indovinato %s %s-%s (%s): foto a %d chat",
-                 w.get("home"), w.get("away"), w.get("score"),
+        schedina.mark_wins_notified(store, [w["id"]])
+        log.info("schedina giornata %s: %s %s-%s (%s): foto a %d chat",
+                 w.get("round"), w.get("home"), w.get("away"), w.get("score"),
                  w.get("id"), sent)

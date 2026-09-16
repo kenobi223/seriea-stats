@@ -89,7 +89,7 @@ def main():
     store.save()
 
     if args.once:
-        run_cycle(store, quick=False)
+        run_cycle(store)
         print("\nStato salvato in", config.STATE_FILE)
         return
 

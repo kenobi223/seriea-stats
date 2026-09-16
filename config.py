@@ -32,7 +32,6 @@ POLITE_DELAY = 0.6                      # secondi tra richieste Sofascore
 
 LAST_RESULTS_N = 10                     # almeno 10 risultati antecedenti
 FORM_WINDOW = 5
-SHOTS_WINDOW = 5                        # tiri in porta: ultime 5 giornate
 
 # Soglie "errore di quota"
 ODD_ERROR_MIN_SPREAD = 0.15             # disallineamento relativo minimo (15%)
@@ -77,22 +76,6 @@ MARKET_ALPHA_FILE = os.path.join(DATA_DIR, "market_alpha.json")
 DIXON_COLES_ENABLED = os.environ.get("DIXON_COLES_ENABLED", "1") != "0"
 DIXON_COLES_RHO = float(os.environ.get("DIXON_COLES_RHO", "-0.13"))
 
-# ---- Parate dei portieri (mercato "saves")
-SAVES_WINDOW = 4                        # ultimi N match finiti per la media
-SAVES_MIN_PLAYED = 2                    # minimo di partite per pubblicare la stima
-SAVES_LEAGUE_FLOOR = 2.4                # media parate/gara di riferimento se mancano dati
-SAVES_BET_THRESHOLD = 3.0               # "over 2.5 parate" = almeno 3 parate (boundary)
-SAVES_BET_MIN_PROB = 0.60               # probabilità minima per consigliare l'over
-
-# ---- Gol attesi (xG) come feature del motore Poisson
-# I gol reali in un campione piccolo (inizio stagione) sono rumorosi: gli
-# expected goals di Sofascore (già in cache nelle stats delle partite) sono
-# un segnale molto più stabile di produzione offensiva/difensiva. Ogni
-# squadra è quindi valutata con un blend tra gol fatti/subiti e xG
-# fatti/subiti. XG_BLEND_WEIGHT misura quanto pesa lo xG sul totale.
-XG_ENABLED = os.environ.get("XG_ENABLED", "1") != "0"
-XG_BLEND_WEIGHT = float(os.environ.get("XG_BLEND_WEIGHT", "0.35"))
-
 # ---- Split casa/trasferta per attacco e difesa
 # Le valutazioni di base (attacco/difesa) usano i totali in classifica. Se
 # una squadra gioca in casa le sue ultime score a casa contano più di quelle
@@ -115,6 +98,11 @@ CALIBRATION_CLAMP_HI = 1.45             # correttore massimo applicabile (1.45 =
 # tramite il monitor live: questa è solo la rete di sicurezza per quando la
 # partita non era in diretta (app spenta / avvio successivo).
 TRACKING_EVAL_DELAY_HOURS = float(os.environ.get("TRACKING_EVAL_DELAY_HOURS", "2.5"))
+
+# Schedina della giornata: quanti esiti diversificati e quante giornate
+# archiviate nel registro storico.
+SCHEDINA_MAX_PICKS = 4
+SCHEDINA_MAX_HISTORY = 12
 
 # Alert "pronto per il 2.5": media mobile degli ultimi N pronostici O/U 2.5
 # valutati (over o under, l'esito suggerito dal modello). Quando la

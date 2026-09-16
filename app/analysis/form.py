@@ -1,5 +1,4 @@
-"""Forma squadre: ultimi N risultati, stagione corrente, casa/trasferta,
-tiri in porta, cartellini subiti, infortuni."""
+"""Forma squadre: ultimi N risultati, stagione corrente, casa/trasferta."""
 import logging
 
 import config
@@ -21,14 +20,6 @@ def _outcome(event, team_id):
     if gf == ga:
         return "D"
     return "A"
-
-
-def _belongs(inc, event, team_id):
-    if inc.get("team_id") is not None:
-        return inc["team_id"] == team_id
-    if inc.get("is_home") is not None:
-        return (event["home_id"] == team_id) == inc["is_home"]
-    return False
 
 
 def build_team_form(client, team_id, name, season_id, n=config.LAST_RESULTS_N):
@@ -54,46 +45,13 @@ def build_team_form(client, team_id, name, season_id, n=config.LAST_RESULTS_N):
     home_results = [e for e in finished if e["home_id"] == team_id][:10]
     away_results = [e for e in finished if e["away_id"] == team_id][:10]
 
-    # ---- tiri in porta dalle statistiche (cached)
-    events_for_stats = [e for e in finished[: config.SHOTS_WINDOW + 3]]
-    stats = client.stats_for_events([e["id"] for e in events_for_stats])
-    shots = []
-    for e in events_for_stats:
-        st = stats.get(e["id"])
-        if not st:
-            continue
-        side = "home" if e["home_id"] == team_id else "away"
-        raw = (st.get(side) or {}).get("shots_on_target")
-        try:
-            shots.append(float(raw))
-        except (TypeError, ValueError):
-            pass
-
-    cards = {"y": 0, "r": 0, "matches": 0}
-    incident_map = client.incidents_for_events([e["id"] for e in event_window(finished, 8)])
-    for eid, incidents in incident_map.items():
-        event = next((e for e in finished if e["id"] == eid), None)
-        if not event:
-            continue
-        cards["matches"] += 1
-        for inc in incidents:
-            if not inc:
-                continue
-            if not _belongs(inc, event, team_id):
-                continue
-            if inc.get("type") == "card":
-                if inc.get("class") == "red":
-                    cards["r"] += 1
-                elif inc.get("class") == "yellow":
-                    cards["y"] += 1
-
     season_record = None
     if current:
         w = sum(1 for e in current if _outcome(e, team_id) == "H")
         d = sum(1 for e in current if _outcome(e, team_id) == "D")
         l = sum(1 for e in current if _outcome(e, team_id) == "A")
         gf = sum((e["home_score"] if e["home_id"] == team_id else e["away_score"]) or 0 for e in current)
-        ga = sum((e["away_score"] if e["home_id"] == team_id else e["home_score"]) or 0 for e in current)
+        ga = sum((e["away_score"] if e["away_id"] == team_id else e["home_score"]) or 0 for e in current)
         season_record = {"giocate": len(current), "v": w, "n": d, "p": l, "gf": gf, "ga": ga}
 
     return {
@@ -102,19 +60,10 @@ def build_team_form(client, team_id, name, season_id, n=config.LAST_RESULTS_N):
         "current_season": season_record,
         "home_results": [_result_summary(e, team_id) for e in home_results],
         "away_results": [_result_summary(e, team_id) for e in away_results],
-        "shots_ontarget": shots,
-        "shots_avg": round(sum(shots) / len(shots), 2) if shots else None,
-        "cards": cards,
-        "cards_y_avg": round(cards["y"] / cards["matches"], 2) if cards["matches"] else None,
         "form_chars": "".join(
             RESULT_CHARS.get(_outcome(e, team_id), "?") for e in
             sorted(finished, key=lambda e: e["start_ts"] or 0, reverse=True)[: config.FORM_WINDOW]),
-        "injuries": client.team_injuries(team_id),
     }
-
-
-def event_window(events, k):
-    return sorted(events, key=lambda e: e["start_ts"] or 0, reverse=True)[:k]
 
 
 def _result_summary(e, team_id):
