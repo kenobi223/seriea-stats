@@ -144,10 +144,11 @@ def create_app(store: Store, tunnel=None):
         from app import notify
         slip = store.get("schedina") or {}
         n = 0
-        for p in slip.get("picks") or []:
-            if p.get("win_notified"):
-                p["win_notified"] = False
-                n += 1
+        for entry in [slip] + (slip.get("history") or []):
+            for p in entry.get("picks") or []:
+                if p.get("win_notified"):
+                    p["win_notified"] = False
+                    n += 1
         if n:
             store.set("schedina", slip)
         pending = schedina.pending_wins(store)

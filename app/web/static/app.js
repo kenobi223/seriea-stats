@@ -606,9 +606,11 @@ function renderSchedina() {
     const st = p.result === "win" ? "✅" : p.result === "loss" ? "❌" : "⏳";
     const pct = ((p.prob || 0) * 100).toFixed(0) + "%";
     const score = p.score ? `  ${p.score}` : "";
+    const lbl = ({1: "1", x: "X", 2: "2", over_2.5: "Over 2.5",
+                  under_2.5: "Under 2.5", si: "BTTS Sì", no: "BTTS No"})[p.pick] || p.pick;
     return `<div class="card"><div class="kv"><span>${esc(p.home)} - ${esc(p.away)}${score}</span>
       <span class="chip">${st}</span></div>
-      <div class="muted">${esc(p.pick)} @ ${fmtOdds(p.odds)} · prob. ${pct}${p.edge != null ? " · edge " + (p.edge * 100).toFixed(0) + "%" : ""}</div></div>`;
+      <div class="muted">${esc(lbl)} @ ${fmtOdds(p.odds)} · prob. ${pct}${p.edge != null ? " · edge " + (p.edge * 100).toFixed(0) + "%" : ""}</div></div>`;
   }).join("");
   const hist = (s.history || []).slice().reverse().map(h =>
     `<div class="card" style="padding:8px 14px"><div class="kv">

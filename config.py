@@ -103,6 +103,7 @@ TRACKING_EVAL_DELAY_HOURS = float(os.environ.get("TRACKING_EVAL_DELAY_HOURS", "2
 # archiviate nel registro storico.
 SCHEDINA_MAX_PICKS = 4
 SCHEDINA_MAX_HISTORY = 12
+SCHEDINA_MIN_PROB = 0.50               # probabilità minima per entrare in schedina
 
 # Alert "pronto per il 2.5": media mobile degli ultimi N pronostici O/U 2.5
 # valutati (over o under, l'esito suggerito dal modello). Quando la

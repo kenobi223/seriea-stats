@@ -269,9 +269,10 @@ def _pronostici_note(tr, tracking):
 def _schedina_text(tr, slip):
     if not slip or not slip.get("picks"):
         return tr._t("schedina_nodata")
+    from app.core import markets
     lines = [tr._t("schedina_title", r=slip.get("round") or "?"), ""]
     for p in (slip.get("picks") or []):
-        pick = p.get("pick") or "?"
+        pick = markets.label(p.get("market") or "1x2", p.get("pick") or "?")
         odds = p.get("odds") or 0
         pct = (p.get("prob") or 0) * 100
         score = p.get("score") or ""
