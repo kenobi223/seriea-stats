@@ -81,6 +81,15 @@ def read_json(name, default=None):
                 return json.loads(raw)
             except Exception:
                 pass
+        # Redis raggiungibile ma chiave assente: semina il file locale se esiste
+        local = _read_local(name)
+        if local is not None:
+            try:
+                r.set("seriea:" + name, json.dumps(local, ensure_ascii=False))
+                log.info("kv: seminato %s da disco a Redis", name)
+            except Exception as e:
+                log.warning("kv seed %s: %s", name, e)
+            return local
     return _read_local(name, default)
 
 
