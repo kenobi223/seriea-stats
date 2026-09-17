@@ -161,7 +161,8 @@ function predictionBlock(fx) {
     for (const m of pickRows) {
       const mp = picks[m];
       if (!mp || !mp.key) continue;
-      const odds = mp.odds ? ` @ ${fmtOdds(mp.odds)}` : "";
+      const odds = mp.odds ? ` @ ${fmtOdds(mp.odds)}`
+        : (mp.fair ? ` @ ${fmtOdds(mp.fair)} (fair)` : "");
       html += `<div class="kv"><span><span class="chip v">${esc(mp.key.toUpperCase())}</span>
         ${esc(mp.conf || "")} · ${esc((mp.prob * 100).toFixed(0))}%${odds}</span>
         <b>${esc(m)}</b></div>`;

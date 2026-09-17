@@ -20,7 +20,6 @@ from app.core import markets
 
 log = logging.getLogger("schedina")
 
-MATCHDAY_WINDOW = 4 * 86400   # la giornata dura al massimo ~96h (ven-lun)
 SCHEDINA_VERSION = 2          # incrementa per ricostruire le schedine vecchie
 
 
@@ -31,6 +30,29 @@ def current_round(store):
     giocate (max ``played`` in classifica + 1)."""
     played = [(r.get("played") or 0) for r in store.get("standings", [])]
     return int(max(played) + 1) if played else None
+
+
+def assign_rounds(store, fixtures, anchor=None):
+    """Assegna il numero di giornata a ogni fixture, per data.
+
+    ESPN non espone mai il numero di giornata. La giornata corrente è
+    ``max(played)+1``; ogni fixture appartiene a quella corrente più il
+    numero di turni di distanza dal suo kickoff all'``anchor`` (kickoff del
+    primo fixture in calendario). I match già giocati ottengono turni
+    precedenti (offset negativo)."""
+    rnd = current_round(store)
+    if rnd is None:
+        return fixtures
+    if anchor is None:
+        anchor = min((f["start_ts"] for f in fixtures if f.get("start_ts")),
+                     default=None)
+    if not anchor:
+        return fixtures
+    for f in fixtures:
+        ts = f.get("start_ts")
+        if ts:
+            f["round"] = rnd + (ts - anchor) // config.MATCHDAY_SPACING
+    return fixtures
 
 
 # ---------- selezione esiti: uno per partita, mercati alternati ----------
@@ -126,7 +148,7 @@ def build(store, now_fx):
     # la finestra di 10 giorni di next_fixtures può spanciare due turni:
     # seleziona solo le partite della prima giornata in arrivo
     from_ts = upcoming[0].start_ts
-    in_round = [f for f in upcoming if f.start_ts - from_ts < MATCHDAY_WINDOW]
+    in_round = [f for f in upcoming if f.start_ts - from_ts < config.MATCHDAY_WINDOW]
 
     picks = _select(_candidates(in_round))
     if not picks:

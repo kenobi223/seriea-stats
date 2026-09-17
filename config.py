@@ -103,6 +103,8 @@ TRACKING_EVAL_DELAY_HOURS = float(os.environ.get("TRACKING_EVAL_DELAY_HOURS", "2
 # giornate archiviate nel registro storico.
 SCHEDINA_MAX_HISTORY = 12
 SCHEDINA_MIN_PROB = 0.50               # probabilità minima per entrare in schedina
+MATCHDAY_WINDOW = 4 * 86400            # durata di una giornata (~96h, ven-lun)
+MATCHDAY_SPACING = 7 * 86400           # intervallo tra primi kickoff di turni consecutivi
 
 # Alert "pronto per il 2.5": media mobile degli ultimi N pronostici O/U 2.5
 # valutati (over o under, l'esito suggerito dal modello). Quando la

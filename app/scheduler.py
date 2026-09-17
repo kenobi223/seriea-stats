@@ -109,9 +109,26 @@ def run_cycle(store):
                 fx.venue = detail.get("venue", fx.venue)
         now_fx.append(fx)
 
+    # ---- ESPN non espone il numero di giornata: lo deriviamo dalla
+    #      classifica (max(played)+1) e dalla data, sia per i fixtures
+    #      imminenti sia per i risultati già archiviati.
+    from app.analysis.schedina import assign_rounds
+    fx_anchor = min((f.start_ts for f in now_fx if f.start_ts), default=None)
+    results = []
+    for rnd in (store.get("results") or []):
+        matches = assign_rounds({"standings": store.get("standings")},
+                                rnd.get("matches") or [], anchor=fx_anchor)
+        by_round = {}
+        for m in matches:
+            by_round.setdefault(m.get("round"), []).append(m)
+        for rnum, ms in sorted(by_round.items()):
+            results.append({"round": rnum, "matches": ms})
+    store.set("results", results)
+
     # salva subito i dati core: tengono vivo lo stato anche se le fasi
     # analitiche successive (forma/h2h) restano in attesa per retry.
-    store.set("fixtures", [fx.to_dict() for fx in sorted(now_fx, key=lambda x: x.start_ts)])
+    store.set("fixtures", assign_rounds(
+        store, [fx.to_dict() for fx in sorted(now_fx, key=lambda x: x.start_ts)]))
     store.save()
 
     # ---- quote aggiornate a ogni ciclo (10 min)
@@ -308,7 +325,8 @@ def run_cycle(store):
     store.set("tracking", tracking)
     store.set("calibration", calibration)
     store.set("code", f"espn-core-api@{os.uname().nodename if hasattr(os, 'uname') else 'host'}")
-    store.set("fixtures", [fx.to_dict() for fx in sorted(now_fx, key=lambda x: x.start_ts)])
+    store.set("fixtures", assign_rounds(
+        store, [fx.to_dict() for fx in sorted(now_fx, key=lambda x: x.start_ts)]))
     store.set("value_flags", [f.to_dict() for f in value_flags])
     store.save()
     log.info("ciclo completato in %.1fs (%d partite)", time.time() - t0, len(now_fx))
