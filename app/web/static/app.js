@@ -444,31 +444,6 @@ function renderTracking() {
   el.innerHTML = html;
 }
 
-// ------------------------------------------------------------- errors
-function renderErrors() {
-  const el = document.getElementById("tab-errors");
-  const flags = state.data.value_flags || [];
-  if (!flags.length) {
-    el.innerHTML = `<div class="card muted">Nessun errore di quota rilevato nell'ultimo refresh. 
-      Le segnalazioni compaiono quando due bookmaker hanno un disallineamento ≥ 15% sullo stesso esito.</div>`;
-    return;
-  }
-  el.innerHTML = `<div class="section-title">${flags.length} segnalazioni · ultimo refresh ${fmtTime(state.data.updated)}</div>`;
-  for (const f of flags) {
-    const vals = Object.entries(f.values || {}).map(([k, v]) =>
-      `<span class="source-pill">${esc(k)} ${fmtOdds(v)}</span>`).join(" ");
-    el.insertAdjacentHTML("beforeend", `
-      <div class="card flag-card ${esc(f.severity)}">
-        <div class="match-head">
-          <div><b>${esc(f.fixture)}</b> <span class="chip ${f.severity === "alert" ? "alert" : "warn"}">${esc(f.kind)}</span></div>
-          <div class="meta">${esc(f.severity === "alert" ? "ATTENZIONE" : "controlla")}</div>
-        </div>
-        <div style="margin-top:6px">${esc(f.message)}</div>
-        <div style="margin-top:6px">${vals}</div>
-      </div>`);
-  }
-}
-
 // ------------------------------------------------------------- standings
 function renderStandings() {
   const el = document.getElementById("tab-standings");
@@ -670,7 +645,6 @@ function renderActive() {
   else if (name === "tracking") renderTracking();
   else if (name === "schedina") renderSchedina();
   else if (name === "ai") renderAI();
-  else if (name === "errors") renderErrors();
   else if (name === "standings") renderStandings();
   else if (name === "sources") renderSources();
 }
