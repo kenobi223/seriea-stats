@@ -905,15 +905,6 @@ class TelegramBot:
                 self._send(chat_id, tr._t("subs_coupon_ok"), _menu_kb(tr))
             else:
                 self._send(chat_id, tr._t("subs_coupon_bad"), _menu_kb(tr))
-        elif text.startswith("/media"):
-            tr = Tr(chat_id)
-            url = config.MEDIA_MANIFEST_URL
-            if not url:
-                self._send(chat_id, tr._t("media_off"), _menu_kb(tr))
-            else:
-                self._send(chat_id,
-                           tr._t("media_title", url=url)
-                           + tr._t("media_note"), _menu_kb(tr))
         else:
             self._send_menu(chat_id)
 

@@ -210,10 +210,6 @@ DEFAULT_PORT = int(os.environ.get("PORT") or "8765")
 # del bot Telegram. Lasciare vuoto per nascondere il bottone.
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 
-# Manifest addon media (Stremio/Nuvio) rivelato dal comando nascosto /media.
-# Lasciare vuoto per disabilitare il comando.
-MEDIA_MANIFEST_URL = os.environ.get("MEDIA_MANIFEST_URL", "").strip()
-
 # Bot Telegram: token da @BotFather (lasciare vuoto per disabilitare).
 # TELEGRAM_ALLOWED_IDS = lista di chat_id autorizzati; vuota = tutti.
 # In env può essere una stringa "id1,id2,...".
