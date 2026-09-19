@@ -68,6 +68,27 @@ def answer(raw_question, fixtures):
     q = _norm(raw_question)
     items = []
 
+    # PRIORITA' 1: se la domanda nomina una partita specifica, spiega SEMPRE quella
+    # (anche se contiene parole come "pronostico" -> altrimenti finiva nel ramo generico)
+    target = None
+    for fx in fixtures:
+        hn = _norm(fx.get("home"))
+        an = _norm(fx.get("away"))
+        if hn and hn in q or an and an in q:
+            target = fx
+            break
+        # match con entrambi i nomi (es. "juventus - milan")
+        if hn and an and hn in q and an in q:
+            target = fx
+            break
+    if target and any(k in q for k in ("spiega", "perche", "motivo", "analizza", "pronostic", "quote", "probabilita", "gol attesi", "xg")):
+        return {
+            "intent": "partita",
+            "intro": f"Ecco perché il modello pronostica {target.get('home')} - {target.get('away')}:",
+            "lines": _partita(target),
+            "items": [],
+        }
+
     if any(k in q for k in ("errore", "arbitrag", "disalline", "quota", "bookmaker")):
         items = _errori(fixtures)
         intro = "Errori di quota (disallineamenti tra bookmaker) rilevati nell'ultimo refresh:"
@@ -80,12 +101,6 @@ def answer(raw_question, fixtures):
         intent = "pronostici"
 
     else:
-        target = None
-        for fx in fixtures:
-            if _norm(fx.get("home")) in q or _norm(fx.get("away")) in q or \
-                    all(t in q for t in (_norm(fx.get("home")), _norm(fx.get("away")))):
-                target = fx
-                break
         if target:
             return {
                 "intent": "partita",
