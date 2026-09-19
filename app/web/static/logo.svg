@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#60a5fa"/>
+    </linearGradient>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0c1226"/>
+      <stop offset="100%" stop-color="#070a14"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#34d399" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  <!-- Shield background -->
+  <rect x="10" y="10" width="100" height="100" rx="22" fill="url(#bg)" stroke="rgba(255,255,255,0.12)" stroke-width="1.5" filter="url(#shadow)"/>
+  <!-- Ball -->
+  <circle cx="60" cy="52" r="28" fill="none" stroke="url(#g)" stroke-width="2.5" opacity="0.95"/>
+  <circle cx="60" cy="52" r="3" fill="url(#g)"/>
+  <!-- Ball panels -->
+  <path d="M60 24 L60 38 M42 44 L53 50 M78 44 L67 50 M46 68 L56 60 M74 68 L64 60 M60 74 L60 80" stroke="url(#g)" stroke-width="1.8" stroke-linecap="round" opacity="0.9"/>
+  <path d="M46 44 Q60 38 74 44 Q68 56 74 68 Q60 74 46 68 Q52 56 46 44" fill="none" stroke="url(#g)" stroke-width="1.4" opacity="0.6"/>
+  <!-- Chart bars under ball -->
+  <g opacity="0.95">
+    <rect x="32" y="88" width="9" height="14" rx="3" fill="url(#g)" opacity="0.95"/>
+    <rect x="46" y="82" width="9" height="20" rx="3" fill="url(#g)" opacity="0.85"/>
+    <rect x="60" y="76" width="9" height="26" rx="3" fill="url(#g)" opacity="0.75"/>
+    <rect x="74" y="84" width="9" height="18" rx="3" fill="url(#g)" opacity="0.65"/>
+    <rect x="88" y="90" width="9" height="12" rx="3" fill="#fff" opacity="0.9"/>
+  </g>
+</svg>
