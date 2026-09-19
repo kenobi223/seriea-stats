@@ -57,6 +57,22 @@ def _api_key():
 
 def _build_context(standings, fixtures):
     lines = []
+    # ultime notizie mister (se presenti, per battute)
+    try:
+        for fx in fixtures[:3]:
+            mo = fx.get("morale") or {}
+            for side in ("home", "away"):
+                m = mo.get(side) or {}
+                notes = m.get("notes") or []
+                if notes:
+                    lines.append(f"NOTIZIA MISTER {fx.get('home') if side=='home' else fx.get('away')}: {notes[0].get('title')}")
+            coach = fx.get("coach") or {}
+            for side in ("home", "away"):
+                c = coach.get(side) or {}
+                if c.get("is_new"):
+                    lines.append(f"ALLENATORE NUOVO {fx.get('home') if side=='home' else fx.get('away')}: {c.get('manager')} da {c.get('since_days')} giorni")
+    except:
+        pass
 
     lines.append("CLASSIFICA SERIE A (stagione corrente):")
     for r in sorted(standings, key=lambda x: (x.get("position") or 99))[:20]:
@@ -100,7 +116,9 @@ _SYSTEM = (
     "'senti a me', 'te lo dico io', 'oh bella lì', ma sei PRECISO coi numeri. "
     "Usi ESCLUSIVAMENTE i dati forniti sotto, non inventi nulla. Se non sai, dici "
     "'ah, su questo non ci metto becco'. Rispondi breve (4-7 frasi), diretto, senza "
-    "markdown o asterischi, come se stessi chiacchierando al bancone con un amico tifoso."
+    "markdown o asterischi, come se stessi chiacchierando al bancone. "
+    "Se nei dati c'è una nota sul mister (conferenza stampa), aggiungi SEMPRE una battuta leggera "
+    "su di lui, in stile bar (es. 'il mister ha parlato, al bar diciamo...')."
 )
 
 

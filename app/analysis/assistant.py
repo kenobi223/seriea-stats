@@ -47,6 +47,22 @@ def _errori(fixtures, limit=8):
     return items
 
 
+def _battuta_mister(team, note_title):
+    if not note_title:
+        return None
+    t = note_title.lower()
+    if "esonero" in t or "addio" in t:
+        return f"Su {team} gira voce di esonero... al bar dicono 'ogni cambio panchina è una scossa, vediamo se la scossa arriva!'"
+    if "vittoria" in t or "vince" in t or "tre punti" in t:
+        return f"Il mister di {team} è carico... al bar dicono 'quando vinci, pure il caffè è più buono!'"
+    if "sconfitta" in t or "ko" in t or "perde" in t:
+        return f"{team} viene da un ko... al bar c'è chi dice 'dopo la pioggia, prima o poi esce il sole... o l'ombrello!'"
+    if "infortun" in t or "assenz" in t:
+        return f"{team} con qualche cerotto... come dice il vecchio al bar: 'gioca chi c'è, non chi manca!'"
+    if "conferenza" in t or "parla" in t or "dice" in t:
+        return f"Il mister di {team} ha parlato in conferenza... al bar traduciamo: 'tante parole, poi parla il campo!'"
+    return f"Ultime dal quartier {team}: '{note_title[:60]}...' - al bar dicono 'staremo a vedere, il campo è giudice!'"
+
 def _partita(fixture):
     p = fixture.get("predictions") or {}
     home, away = fixture.get("home"), fixture.get("away")
@@ -70,9 +86,7 @@ def _partita(fixture):
     for b in p.get("best_bets", [])[:1]:
         lines.append(f"E se proprio vuoi puntarci due spicci, il modello mi dice '{b['pick']}' a {b['odds']} (prob {b['prob']*100:.0f}%)... ma gioca leggero, che il pallone è strano.")
     if p.get("motivation"):
-        # rendi la motivazione tecnica più bar-style: spezza e aggiungi intercalare
         mot = p["motivation"]
-        # prendi solo prime 2 frasi per non annoiare
         parts = mot.split(". ")
         short = ". ".join(parts[:2])
         if short and not short.endswith("."):
@@ -80,6 +94,27 @@ def _partita(fixture):
         lines.append(f"Ti spiego perché: {short} Insomma, al bar diremmo che chi sta meglio ora ha quel pizzico in più.")
     else:
         lines.append("Non ho ancora abbastanza dati per darti il perché preciso... ripassa più vicino al fischio.")
+    # battuta fresca dal mister (ultime notizie)
+    try:
+        morale = fixture.get("morale") or {}
+        for side, team in [("home", home), ("away", away)]:
+            m = morale.get(side) or {}
+            notes = m.get("notes") or []
+            if notes:
+                batt = _battuta_mister(team, notes[0].get("title") or "")
+                if batt:
+                    lines.append(batt)
+                    break
+        # coach nuovo? battuta extra
+        coach = fixture.get("coach") or {}
+        for side, team in [("home", home), ("away", away)]:
+            c = coach.get(side) or {}
+            if c.get("is_new"):
+                mgr = c.get("manager") or "nuovo mister"
+                lines.append(f"Occhio al nuovo {mgr} sulla panchina di {team}... nuova scopa scopa bene, dicono al bar!")
+                break
+    except:
+        pass
     return lines
 
 
