@@ -139,6 +139,8 @@ tr:hover td { background: rgba(255,255,255,.03); }
 .history-card:hover { background: rgba(255,255,255,.04); }
 .history-picks { display: none; margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px; }
 .history-card.open .history-picks { display: block; }
+.hit-card { cursor: pointer; }
+.hit-card:hover { background: rgba(255,255,255,.04); }
 
 /* ---- risultati e live ---- */
 .live-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }

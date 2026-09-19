@@ -323,11 +323,12 @@ function renderTracking() {
     <div class="grid3">
       <div class="card"><div class="big-num">${t.evaluated || 0}</div>
         <div class="muted">partite valutate a fine gara</div></div>
-      <div class="card"><div class="big-num">${t.bets_hit || 0}/${t.bets_total || 0}</div>
-        <div class="muted">pronostici indovinati (${rate})</div></div>
+      <div class="card hit-card" onclick="toggleHits(this)"><div class="big-num">${t.bets_hit || 0}/${t.bets_total || 0}</div>
+        <div class="muted">pronostici indovinati (${rate}) · clicca per i dettagli</div></div>
       <div class="card"><div class="big-num">${brier}</div>
         <div class="muted">Brier score · più basso = più onesto</div></div>
-    </div>`;
+    </div>
+    <div id="hit-detail"></div>`;
 
   // conteggio per PARTITA (una partita può avere più best-bet/vincere in + mercati)
   if (t.match_bets_total) {
@@ -442,6 +443,39 @@ function renderTracking() {
       confronto pronostico vs risultato reale qui, mostro il tasso di centratura e correggo il modello.</div>`;
   }
   el.innerHTML = html;
+}
+
+let hitsLoaded = false;
+async function toggleHits(card) {
+  card.classList.toggle("open");
+  const box = document.getElementById("hit-detail");
+  const wantOpen = card.classList.contains("open");
+  box.innerHTML = wantOpen ? `<div class="muted">Carico i pronostici indovinati…</div>` : "";
+  if (!wantOpen || hitsLoaded) return;
+  hitsLoaded = true;
+  try {
+    const r = await fetch("/api/tracking-records");
+    const data = await r.json();
+    const rows = [];
+    for (const rec of data.records || []) {
+      for (const h of rec.hits || []) {
+        if (!h.hit) continue;
+        rows.push({ ...h, home: rec.home, away: rec.away, score: rec.score, round: rec.round });
+      }
+    }
+    if (!rows.length) {
+      box.innerHTML = `<div class="card muted">Nessun pronostico indovinato.</div>`;
+      return;
+    }
+    box.innerHTML = `<div class="card"><div class="section-title" style="margin-top:0">✅ Pronostici indovinati (${rows.length})</div>` +
+      rows.map(h => `<div class="kv"><span><b>${esc(h.home)} - ${esc(h.away)}</b>
+        <span class="muted">(${esc(h.score)} · gj ${esc(h.round || "?")})</span></span>
+        <span><span class="chip v">${pickLabel(h.market, h.pick)}</span>
+        lo davo al ${((h.prob || 0) * 100).toFixed(0)}% @ ${fmtOdds(h.odds)}</span></div>`).join("") +
+      `</div>`;
+  } catch (e) {
+    box.innerHTML = `<div class="card muted">Errore nel caricamento dei dettagli.</div>`;
+  }
 }
 
 // ------------------------------------------------------------- standings
