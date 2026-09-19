@@ -206,6 +206,10 @@ REDIS_URL = os.environ.get("REDIS_URL", "")
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = int(os.environ.get("PORT") or "8765")
 
+# URL pubblico del sito web (Render onrender.com): serve al bottone "Sito Web"
+# del bot Telegram. Lasciare vuoto per nascondere il bottone.
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
+
 # Bot Telegram: token da @BotFather (lasciare vuoto per disabilitare).
 # TELEGRAM_ALLOWED_IDS = lista di chat_id autorizzati; vuota = tutti.
 # In env può essere una stringa "id1,id2,...".

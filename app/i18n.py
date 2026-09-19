@@ -25,6 +25,7 @@ T = {
         "menu_segui": "🔔 Segui squadra",
         "menu_stopsegui": "🔕 Ferma follow",
         "menu_donazioni": "⭐ Donazioni",
+        "menu_sito": "🌐 Vai al sito web",
         "menu_menu": "🏠 Menu",
         "disclaimer": ("⚠️ I pronostici sono SOLO stime statistiche, NON sono consigli "
                        "finanziari né risultati sicuri: anche il modello sbaglia. "

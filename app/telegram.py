@@ -303,12 +303,16 @@ def _schedina_text(tr, slip):
 
 # ---------------------------------------------------------------- tastiere
 def _kb(rows):
+    def btn(t, d):
+        if d.startswith("http"):
+            return {"text": t, "url": d}
+        return {"text": t, "callback_data": d}
     return {"inline_keyboard": [
-        [{"text": t, "callback_data": d} for t, d in row] for row in rows]}
+        [btn(t, d) for t, d in row] for row in rows]}
 
 
 def _menu_kb(tr):
-    return _kb([
+    rows = [
         [(tr._t("menu_classifica"), "p:classifica"),
          (tr._t("menu_partite"), "p:partite")],
         [(tr._t("menu_risultati"), "p:risultati"),
@@ -319,9 +323,12 @@ def _menu_kb(tr):
          [(tr._t("menu_schedina"), "p:schedina")],
         [(tr._t("menu_segui"), "flw"),
          (tr._t("menu_stopsegui"), "unf")],
-        [(tr._t("menu_donazioni"), "don"),
-         (tr._t("menu_menu"), "m")],
-    ])
+    ]
+    if config.PUBLIC_URL:
+        rows.append([(tr._t("menu_sito"), config.PUBLIC_URL)])
+    rows.append([(tr._t("menu_donazioni"), "don"),
+                 (tr._t("menu_menu"), "m")])
+    return _kb(rows)
 
 
 def _don_kb(tr):
