@@ -7,7 +7,7 @@ espn                si       si        si       si    si(punteggi) si(1X2) no
 import logging
 
 import config
-from app.sources import espn, lega, sofascore
+from app.sources import espn, sofascore
 
 log = logging.getLogger("sources")
 
@@ -22,7 +22,6 @@ _CORE = {
 class FootballClient:
     def __init__(self):
         factories = {
-            "lega": lega.LegaClient,
             "sofascore": sofascore.SofascoreClient,
             "espn": espn.EspnClient,
         }
