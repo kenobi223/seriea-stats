@@ -568,6 +568,17 @@ async function askAI(question) {
   }
 }
 
+function pickRow(p) {
+  const st = p.result === "win" ? "✅" : p.result === "loss" ? "❌" : "⏳";
+  const pct = ((p.prob || 0) * 100).toFixed(0) + "%";
+  const score = p.score ? `  ${p.score}` : "";
+  const lbl = ({1: "1", x: "X", 2: "2", "over_2.5": "Over 2.5",
+                "under_2.5": "Under 2.5", si: "BTTS Sì", no: "BTTS No"})[p.pick] || p.pick;
+  return `<div class="card"><div class="kv"><span>${esc(p.home)} - ${esc(p.away)}${score}</span>
+      <span class="chip">${st}</span></div>
+      <div class="muted">${esc(lbl)} @ ${fmtOdds(p.odds)} · prob. ${pct}${p.edge != null ? " · edge " + (p.edge * 100).toFixed(0) + "%" : ""}</div></div>`;
+}
+
 function renderSchedina() {
   const el = document.getElementById("tab-schedina");
   const s = state.data.schedina || {};
@@ -578,20 +589,13 @@ function renderSchedina() {
   }
   const won = s.picks.filter(p => p.result === "win").length;
   const lost = s.picks.filter(p => p.result === "loss").length;
-  const rows = s.picks.map(p => {
-    const st = p.result === "win" ? "✅" : p.result === "loss" ? "❌" : "⏳";
-    const pct = ((p.prob || 0) * 100).toFixed(0) + "%";
-    const score = p.score ? `  ${p.score}` : "";
-    const lbl = ({1: "1", x: "X", 2: "2", "over_2.5": "Over 2.5",
-                  "under_2.5": "Under 2.5", si: "BTTS Sì", no: "BTTS No"})[p.pick] || p.pick;
-    return `<div class="card"><div class="kv"><span>${esc(p.home)} - ${esc(p.away)}${score}</span>
-      <span class="chip">${st}</span></div>
-      <div class="muted">${esc(lbl)} @ ${fmtOdds(p.odds)} · prob. ${pct}${p.edge != null ? " · edge " + (p.edge * 100).toFixed(0) + "%" : ""}</div></div>`;
-  }).join("");
+  const rows = s.picks.map(pickRow).join("");
   const hist = (s.history || []).slice().reverse().map(h =>
-    `<div class="card" style="padding:8px 14px"><div class="kv">
-       <span>Giornata ${h.round}</span>
-       <span class="muted">${h.wins} vinti · ${h.losses} persi</span></div></div>`).join("");
+    `<div class="card history-card" onclick="this.classList.toggle('open')">
+       <div class="kv"><span>Giornata ${h.round}</span>
+       <span class="muted">${h.wins} vinti · ${h.losses} persi · ▼</span></div>
+       <div class="history-picks">${(h.picks || []).map(pickRow).join("")}</div>
+     </div>`).join("");
   el.innerHTML = `<div class="section-title">🎫 Schedina della giornata ${s.round || "?"}</div>
     <div class="grid3">
       <div class="card"><div class="big-num">${won}/${s.picks.length}</div>
