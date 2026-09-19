@@ -15,3 +15,7 @@ bin/cloudflared
 # IDE / OS
 .DS_Store
 *.swp
+# helper locale PC secondario
+RIENTRA_IN_CHAT.md
+sync.ps1
+
