@@ -669,8 +669,19 @@ async function renderTunnel() {
 // ------------------------------------------------------------- tabs & poll
 function switchTab(name) {
   tabs.forEach(b => b.classList.toggle("active", b.dataset.tab === name));
-  document.querySelectorAll(".tab").forEach(s => s.classList.toggle("active", s.id === "tab-" + name));
+  const all = document.querySelectorAll(".tab");
+  all.forEach(s => {
+    if (s.id === "tab-" + name) {
+      s.classList.add("active");
+      s.style.animation = "none";
+      s.offsetHeight; // reflow
+      s.style.animation = "";
+    } else {
+      s.classList.remove("active");
+    }
+  });
   renderActive();
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 tabs.forEach(b => b.addEventListener("click", () => switchTab(b.dataset.tab)));
@@ -687,6 +698,14 @@ function renderActive() {
   else if (name === "sources") renderSources();
 }
 
+function showSkeleton() {
+  const active = document.querySelector("#tabs button.active");
+  const name = active ? active.dataset.tab : "matches";
+  const el = document.getElementById("tab-" + name);
+  if (el && !state.data) {
+    el.innerHTML = `<div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card" style="height:120px"></div>`;
+  }
+}
 async function poll() {
   try {
     const r = await fetch("/api/state");
@@ -697,7 +716,7 @@ async function poll() {
     document.getElementById("cycle-status").textContent = "connessione al server interrotta";
   }
 }
-
+showSkeleton();
 poll();
 setInterval(poll, REFRESH_MS);
 setInterval(refreshLive, LIVE_REFRESH_MS);
