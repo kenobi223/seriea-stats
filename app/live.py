@@ -137,12 +137,27 @@ class LiveMonitor:
             prev[eid] = m
 
         # partite che non sono più live (sparite dall'elenco -> finite)
+        # fix leak: traccia quando è sparita per expire dopo 6h se API down
+        if not hasattr(self, "_gone_at"):
+            self._gone_at = {}
+        current_ids = {m["id"] for m in matches}
         for eid in list(prev.keys()):
-            if eid not in matches and self._gone_live(eid):
-                gone = prev[eid]
-                if gone.get("status") != "finished":
-                    finished_now.append(gone)
-                prev.pop(eid)
+            if eid not in current_ids:
+                if self._gone_live(eid):
+                    gone = prev[eid]
+                    if gone.get("status") != "finished":
+                        finished_now.append(gone)
+                    prev.pop(eid)
+                    self._gone_at.pop(eid, None)
+                else:
+                    # se non confermato finito, expire dopo 6h per evitare leak
+                    if eid not in self._gone_at:
+                        self._gone_at[eid] = time.time()
+                    elif time.time() - self._gone_at[eid] > 6 * 3600:
+                        prev.pop(eid)
+                        self._gone_at.pop(eid, None)
+            else:
+                self._gone_at.pop(eid, None)
 
         self._snapshot = prev
         self.store.set("live", {

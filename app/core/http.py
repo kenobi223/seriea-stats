@@ -117,8 +117,25 @@ class HTTPClient:
                     if resp.status_code in (429, 503) and attempt < max_retries - 1:
                         time.sleep(2 * (attempt + 1))
                         continue
-                    log.warning("GET %s -> HTTP %s", url, resp.status_code)
+                    if resp.status_code in (200, 204):
+                        pass
+                    else:
+                        log.warning("GET %s -> HTTP %s", url, resp.status_code)
+                        # se Tor fallisce spesso, dopo N fallimenti torna a diretto per ritentare
+                        if use_tor and attempt >= 3:
+                            self._use_tor = False
+                            log.info("Tor troppi fallimenti, torno a diretto per %s", url)
                     return None
+                # successo: se eravamo in failover Tor ma diretto ora funziona, torna a diretto dopo qualche successo
+                if self._use_tor and self.tor_mode == "auto":
+                    # conta successi e dopo 5 torna a diretto
+                    if not hasattr(self, "_tor_success"):
+                        self._tor_success = 0
+                    self._tor_success += 1
+                    if self._tor_success >= 5:
+                        self._use_tor = False
+                        self._tor_success = 0
+                        log.info("Tor failover recuperato, torno a diretto")
                 return resp.json() if as_json else resp
             except requests.RequestException as e:
                 if self._use_tor:

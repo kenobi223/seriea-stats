@@ -172,9 +172,10 @@ SOFASCORE_BASE = "https://www.sofascore.com/api/v1"
 DATA_SOURCE_ORDER = [s.strip() for s in os.environ.get(
     "DATA_SOURCE_ORDER", "espn,sofascore").split(",") if s.strip()]
 # Sofascore è bloccato (403) da IP datacenter/Render e ogni sua chiamata
-# resta in retry Tor blocando il ciclo: escluso per sempre, anche se l'env
-# lo riconfigura. Solo il motore ESPN (che risponde 200) viene usato.
-DATA_SOURCE_ORDER = [s for s in DATA_SOURCE_ORDER if s != "sofascore"]
+# resta in retry Tor bloccando il ciclo: lo escludiamo SOLO su Render/Koyeb,
+# in locale (con Tor funzionante) resta disponibile per dati ricchi.
+if os.environ.get("RENDER") or os.environ.get("KOYEB") or os.environ.get("RENDER_SERVICE_ID"):
+    DATA_SOURCE_ORDER = [s for s in DATA_SOURCE_ORDER if s != "sofascore"]
 
 ODDSPORTAL_SERIEA_URL = "https://www.oddsportal.com/it/football/italy/serie-a/"
 CENTROQUOTE_SERIEA_URL = "https://www.centroquote.it/football/italy/serie-a/"

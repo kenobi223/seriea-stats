@@ -45,12 +45,19 @@ def _norm(s):
 
 
 def _split_long(text):
-    """Divide un messaggio troppo lungo per Telegram in più pezzi."""
+    """Divide un messaggio troppo lungo per Telegram in più pezzi (iterativo, no ricorsione)."""
     if len(text) <= MAX_MSG:
         return [text]
-    cut = text.rfind("\n", 0, MAX_MSG)
-    head = text[:MAX_MSG] if cut <= 0 else text[:cut]
-    return [head] + _split_long(text[len(head):])
+    out = []
+    while len(text) > MAX_MSG:
+        cut = text.rfind("\n", 0, MAX_MSG)
+        if cut <= 0:
+            cut = MAX_MSG
+        out.append(text[:cut])
+        text = text[cut:].lstrip("\n")
+    if text:
+        out.append(text)
+    return out
 
 
 def _clean(s):
@@ -374,7 +381,15 @@ class TelegramBot:
             r = requests.post(url, json=payload, timeout=timeout)
             data = r.json()
             if not data.get("ok"):
-                log.warning("Telegram %s: %s", method, data.get("description"))
+                desc = str(data.get("description") or "")
+                log.warning("Telegram %s: %s", method, desc)
+                # backoff su flood control di Telegram
+                if "Too Many" in desc or "retry after" in desc.lower():
+                    import re
+                    m = re.search(r"retry after (\d+)", desc.lower())
+                    wait = int(m.group(1)) if m else 5
+                    log.warning("Telegram flood, attendo %ds", wait)
+                    time.sleep(wait)
                 return None
             return data.get("result")
         except Exception as e:
@@ -834,9 +849,12 @@ class TelegramBot:
         self._call("answerPreCheckoutQuery",
                    {"pre_checkout_query_id": query_id, "ok": True})
 
-    def _on_successful_payment(self, chat_id, payment):
+    def _on_successful_payment(self, chat_id, payment, payload=""):
         tr = Tr(chat_id)
         stars = payment.get("total_amount") or 0
+        # payload opzionale per verifica futura (invoice_payload)
+        if payload:
+            log.info("Telegram: pagamento verificato payload %s", payload)
         self._send(chat_id, tr._t("don_thanks", stars=stars), _menu_kb(tr))
 
     # ------------------------------------------------------------ comandi

@@ -97,9 +97,22 @@ def create_app(store: Store, tunnel=None):
         locale. Usato una sola volta per ripristinare le valutazioni del
         13/09 perse tra Redis e locale. Mantiene entrambi gli id (es. in
         caso di duplicati lo-fixture): preferisce il record già valutato."""
+        # auth: solo owner o token segreto per evitare avvelenamento learning.json
+        auth = request.headers.get("X-Import-Token") or request.args.get("token") or ""
+        expected = os.environ.get("IMPORT_TOKEN") or ""
+        if expected and auth != expected:
+            # fallback: check Telegram owner via simple header chat_id
+            try:
+                cid = int(request.headers.get("X-Chat-Id") or 0)
+                if cid not in (config.TELEGRAM_OWNER_IDS or []):
+                    return jsonify({"error": "unauthorized"}), 401
+            except:
+                return jsonify({"error": "unauthorized"}), 401
         from app.analysis import tracker
         payload = request.get_json(silent=True) or {}
         incoming = payload.get("records")
+        if isinstance(incoming, list) and len(incoming) > 200:
+            return jsonify({"error": "troppi records (max 200)"}), 400
         if not isinstance(incoming, list):
             return jsonify({"error": "manca records[]"}), 400
         def _picks(r):
@@ -140,6 +153,16 @@ def create_app(store: Store, tunnel=None):
     @app.post("/api/tracking-renotify")
     def api_tracking_renotify():
         """Retest notifiche: azzera win_notified della schedina e reinvia."""
+        # auth come sopra
+        auth = request.headers.get("X-Import-Token") or request.args.get("token") or ""
+        expected = os.environ.get("IMPORT_TOKEN") or ""
+        if expected and auth != expected:
+            try:
+                cid = int(request.headers.get("X-Chat-Id") or 0)
+                if cid not in (config.TELEGRAM_OWNER_IDS or []):
+                    return jsonify({"error": "unauthorized"}), 401
+            except:
+                return jsonify({"error": "unauthorized"}), 401
         from app.analysis import schedina
         from app import notify
         slip = store.get("schedina") or {}

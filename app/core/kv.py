@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import threading
+import time
 
 import config
 
@@ -17,6 +18,7 @@ log = logging.getLogger("kv")
 _lock = threading.RLock()
 _client = None
 _tried = False
+_tried_at = 0
 
 # nome logico degli "stati" -> percorso locale di fallback
 KEYS = {
@@ -44,14 +46,18 @@ def _redis_url():
 
 
 def _redis():
-    global _client, _tried
+    global _client, _tried, _tried_at
     if not config.REDIS_URL:
         return None
-    if _client is None and _tried:
+    # retry ogni 5 minuti se prima fallito
+    if _client is None and _tried and (time.time() - _tried_at) < 300:
         return None
+    if _client is None and _tried and (time.time() - _tried_at) >= 300:
+        _tried = False
     with _lock:
         if _client is None and not _tried:
             _tried = True
+            _tried_at = time.time()
         else:
             return _client
         try:

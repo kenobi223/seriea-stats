@@ -59,8 +59,11 @@ class EspnClient:
 
     # ------------------------------------------------------------- stagione
     def resolve_season(self):
-        # id = anno corrente: i team schedule di ESPN portano season.year
-        return {"id": "2026", "name": "Serie A", "source": "espn"}
+        # id = anno corrente dinamico (fix hardcoded 2026)
+        year = datetime.now().year
+        # Serie A tipicamente agosto-maggio: se siamo prima di luglio siamo ancora nella stagione precedente
+        # ma ESPN usa l'anno di inizio stagione come id, quindi usiamo year direttamente
+        return {"id": str(year), "name": "Serie A", "source": "espn"}
 
     def _team_name(self, team_id):
         if team_id not in self._teams_cache:

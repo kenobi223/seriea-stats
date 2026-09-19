@@ -82,6 +82,12 @@ def run_cycle(store):
     standings = client.standings(season_id)
     if standings:
         store.set("standings", standings)
+    else:
+        # fallback: usa standings salvati se API momentaneamente down
+        standings = store.get("standings", []) or []
+        if not standings:
+            log.warning("standings vuoti, ciclo abortito")
+            return
 
     # ---- risultati delle giornate antecedenti (una richiesta, cache di
     #      giornata: cambiano solo quando finiscono le partite)

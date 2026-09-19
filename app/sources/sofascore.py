@@ -46,35 +46,39 @@ class SofascoreClient:
     def _ttl_cached(self, key, ttl, generator):
         """Cache generica su disco con TTL (secondi); generator -> valore JSON."""
         path = os.path.join(self.cache_dir, key + ".json")
-        if os.path.exists(path):
-            try:
-                with open(path, encoding="utf-8") as f:
-                    blob = json.load(f)
-                if time.time() - (blob.get("t") or 0) < ttl:
-                    return blob.get("d")
-            except Exception:
-                pass
+        with self._mem:
+            if os.path.exists(path):
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        blob = json.load(f)
+                    if time.time() - (blob.get("t") or 0) < ttl:
+                        return blob.get("d")
+                except Exception:
+                    pass
         val = generator()
         try:
-            os.makedirs(self.cache_dir, exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({"t": time.time(), "d": val}, f, ensure_ascii=False)
+            with self._mem:
+                os.makedirs(self.cache_dir, exist_ok=True)
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump({"t": time.time(), "d": val}, f, ensure_ascii=False)
         except Exception as e:
             log.debug("ttl cache %s: %s", key, e)
         return val
 
     def _cached(self, key, generator):
         path = os.path.join(self.cache_dir, key + ".json")
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                pass
+        with self._mem:
+            if os.path.exists(path):
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        return json.load(f)
+                except Exception:
+                    pass
         value = generator()
         if value is not None:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(value, f, ensure_ascii=False)
+            with self._mem:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(value, f, ensure_ascii=False)
         return value
 
     # ------------------------------------------------------------- season
