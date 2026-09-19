@@ -49,17 +49,37 @@ def _errori(fixtures, limit=8):
 
 def _partita(fixture):
     p = fixture.get("predictions") or {}
+    home, away = fixture.get("home"), fixture.get("away")
     lines = []
-    lines.append(f"{fixture.get('home')} - {fixture.get('away')} (giornata {fixture.get('round') or '?'})")
+    # bar style: intro calda
+    lines.append(f"Ah, {home} - {away} di giornata {fixture.get('round') or '?'}... bella partita, te lo dico io come la vedo.")
     if "1x2" in p:
-        lines.append("Probabilità 1X2: " + " · ".join(
-            f"{k} {v*100:.0f}%" for k, v in sorted(p["1x2"].items())))
-    for b in p.get("best_bets", [])[:2]:
-        lines.append(f"Punta: {b['pick']} @ {b['odds']} (valore +{b['edge']*100:.0f}%)")
-    for sp in fixture.get("value_flags", []):
-        lines.append("⚠ " + sp.get("message", ""))
+        prob = p["1x2"]
+        # frase bar invece di lista tecnica
+        top = max(prob, key=lambda k: prob[k])
+        top_pct = prob[top]*100
+        label = {"1": home, "x": "pareggio", "2": away}[top]
+        lines.append(f"Secondo me qui {label} è favorito al {top_pct:.0f}% (1: {prob.get('1',0)*100:.0f}% · X: {prob.get('x',0)*100:.0f}% · 2: {prob.get('2',0)*100:.0f}%).")
+        if p.get("lambdas"):
+            lh, la = p["lambdas"].get("home_goals"), p["lambdas"].get("away_goals")
+            if lh is not None and la is not None:
+                lines.append(f"Mi aspetto più o meno {lh:.2f} gol per {home} e {la:.2f} per {away}... partita che si sblocca, non 0-0 da sbadiglio.")
+        if p.get("exact_score"):
+            es = p["exact_score"][0]
+            lines.append(f"Se devo sparare un risultato, ti dico {es['score']} al {es['prob']*100:.0f}%... da bar, eh, prendilo con le pinze.")
+    for b in p.get("best_bets", [])[:1]:
+        lines.append(f"E se proprio vuoi puntarci due spicci, il modello mi dice '{b['pick']}' a {b['odds']} (prob {b['prob']*100:.0f}%)... ma gioca leggero, che il pallone è strano.")
     if p.get("motivation"):
-        lines.append("Perché: " + p["motivation"])
+        # rendi la motivazione tecnica più bar-style: spezza e aggiungi intercalare
+        mot = p["motivation"]
+        # prendi solo prime 2 frasi per non annoiare
+        parts = mot.split(". ")
+        short = ". ".join(parts[:2])
+        if short and not short.endswith("."):
+            short += "."
+        lines.append(f"Ti spiego perché: {short} Insomma, al bar diremmo che chi sta meglio ora ha quel pizzico in più.")
+    else:
+        lines.append("Non ho ancora abbastanza dati per darti il perché preciso... ripassa più vicino al fischio.")
     return lines
 
 
@@ -84,7 +104,7 @@ def answer(raw_question, fixtures):
     if target and any(k in q for k in ("spiega", "perche", "motivo", "analizza", "pronostic", "quote", "probabilita", "gol attesi", "xg")):
         return {
             "intent": "partita",
-            "intro": f"Ecco perché il modello pronostica {target.get('home')} - {target.get('away')}:",
+            "intro": f"Oh, {target.get('home')} - {target.get('away')}? Siediti, te la racconto come al bar:",
             "lines": _partita(target),
             "items": [],
         }
@@ -104,7 +124,7 @@ def answer(raw_question, fixtures):
         if target:
             return {
                 "intent": "partita",
-                "intro": f"Ecco l'analisi di {target.get('home')} - {target.get('away')}:",
+                "intro": f"Ah, {target.get('home')} - {target.get('away')}? Te la leggo come la vedo io al bar:",
                 "lines": _partita(target),
                 "items": [],
             }
