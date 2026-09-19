@@ -583,35 +583,43 @@ const AI_SUGGESTIONS = [
   "Analizza Juventus - Milan",
 ];
 
-function initAI() {
+function renderAIInsights(){
   const el = document.getElementById("tab-ai");
-  if (aiReady) return;
-  if (!state.data) { setTimeout(renderAI, 800); return; }
-  aiReady = true;
-  try {
-    const fixtures = state.data.fixtures || [];
-    const suggestions = AI_SUGGESTIONS.concat(
-      fixtures.slice(0, 3).map(f => `Analizza ${f.home} - ${f.away}`)
-    );
-    state.aiSuggestions = suggestions;
-    el.innerHTML = `
-    <div class="card ai-card">
-      <div class="section-title">Chiedi all'AI · consigli sui dati reali raccolti</div>
-      <p class="muted" style="margin-top:-6px">Chiedi in italiano: pronostici, errori di quota
-      o un'analisi partita.</p>
-      <div class="ai-suggest">${suggestions.map((s, i) =>
-        `<button class="chip ai-chip" onclick="askAIByIndex(${i})">${esc(s)}</button>`).join(" ")}</div>
-      <div id="ai-log" class="ai-log"></div>
-      <div class="form-row compact">
-        <input id="ai-input" placeholder="es. qual è il pronostico della giornata?"
-          onkeydown="if(event.key==='Enter')askAI(this.value)">
+  el.innerHTML = `<div class="card ai-card"><div class="section-title">AI Insights · Serie A only</div><p class="muted">Due modi: chiedi libero o spiega un pronostico specifico.</p><div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px;"><div id="ai-col"></div><div id="explain-col"></div></div></div>`;
+  initAIInto(document.getElementById("ai-col"));
+  renderExplainInto(document.getElementById("explain-col"));
+}
+function initAIInto(container){
+  if(!container) return;
+  if(!state.data){ container.innerHTML=`<div class="muted">Carico...</div>`; setTimeout(()=>renderAIInsights(),800); return; }
+  const fixtures = state.data.fixtures || [];
+  const suggestions = AI_SUGGESTIONS.concat(fixtures.slice(0,2).map(f=> `Analizza ${f.home} - ${f.away}`));
+  state.aiSuggestions = suggestions;
+  container.innerHTML = `
+    <div class="subpanel"><h3>Chiedi all'AI</h3>
+      <div class="ai-suggest">${suggestions.map((s,i)=> `<button class="chip ai-chip" onclick="askAIByIndex(${i})">${esc(s)}</button>`).join(" ")}</div>
+      <div id="ai-log" class="ai-log" style="max-height:300px;"></div>
+      <div style="display:flex; gap:6px; margin-top:8px;">
+        <input id="ai-input" placeholder="es. errori di quota?" style="flex:1;" onkeydown="if(event.key==='Enter')askAI(this.value)">
         <button class="cta" onclick="askAI(document.getElementById('ai-input').value)">Chiedi</button>
       </div>
     </div>`;
-  } catch (e) {
-    aiReady = false;
-    el.innerHTML = `<div class="card muted">Errore nel caricamento della chat. Ricarica la pagina.</div>`;
-  }
+}
+function renderExplainInto(container){
+  if(!container) return;
+  const fixtures = (state.data?.fixtures||[]);
+  if(!fixtures.length){ container.innerHTML=`<div class="muted">Nessuna partita.</div>`; return; }
+  const opts = fixtures.map(f=> `<option value="${esc(f.home)} - ${esc(f.away)}">${esc(f.home)} - ${esc(f.away)}</option>`).join("");
+  container.innerHTML = `
+    <div class="subpanel"><h3>Perché questo pronostico?</h3>
+      <select id="explain-select" style="width:100%; margin:8px 0;">${opts}</select>
+      <button class="cta" style="width:100%;" onclick="explainSelected()">Spiega con AI bar</button>
+      <div id="explain-log" class="ai-log" style="max-height:300px; margin-top:8px;"></div>
+    </div>`;
+}
+function initAI() {
+  // legacy wrapper per compatibilità
+  renderAIInsights();
 }
 
 function askAIByIndex(i) {
@@ -694,7 +702,7 @@ function renderSchedina() {
 }
 
 function renderAI() {
-  initAI();
+  renderAIInsights();
 }
 
 // ------------------------------------------------------------- tunnel + telegram
@@ -773,6 +781,34 @@ function populateRoundFilter(){
   sel.value = cur;
 }
 
+function renderTeams(){
+  const el = document.getElementById("tab-teams");
+  let rows = [...(state.data?.standings||[])];
+  if(state.filterText){
+    const q = state.filterText.toLowerCase();
+    rows = rows.filter(r=> r.name.toLowerCase().includes(q));
+  }
+  if(!rows.length){ el.innerHTML=`<div class="card muted">Nessuna squadra.</div>`; return; }
+  const fixtures = state.data?.fixtures||[];
+  const formByTeam = new Map();
+  for(const fx of fixtures){ formByTeam.set(fx.home_id, fx.form_home); formByTeam.set(fx.away_id, fx.form_away); }
+  el.innerHTML = `<div class="section-title">Squadre Serie A · 20 club · solo Serie A</div><div style="display:grid; grid-template-columns: repeat(auto-fill,minmax(280px,1fr)); gap:14px;">` +
+    rows.map(r=>{
+      const f = formByTeam.get(r.team_id);
+      const last = f ? (f.last_results||[]).slice(-5).map(e=> chipFrom(resultCharMap(e.result)||"?")).join("") : "";
+      const fav = isFav(r.name);
+      return `<div class="card" style="margin:0; cursor:pointer;" onclick="state.filterText='${esc(r.name)}'; switchTab('matches')">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <b>${r.position}. ${esc(r.name)}</b>
+          <button class="ghost" style="padding:2px 8px;" onclick="event.stopPropagation(); toggleFav('${esc(r.name)}'); renderTeams()">${fav?'★':'☆'}</button>
+        </div>
+        <div class="kv"><span class="muted">Punti</span><b>${r.points} · ${r.played}G · ${r.wins}V ${r.draws}N ${r.losses}P</b></div>
+        <div class="kv"><span class="muted">Gol</span><b>${r.gf} fatti · ${r.ga} subiti</b></div>
+        <div class="kv"><span class="muted">Forma</span><span class="chips">${last||'<span class=muted>—</span>'}</span></div>
+        <div class="muted" style="margin-top:8px; font-size:11px;">Clicca per vedere partite →</div>
+      </div>`;
+    }).join("") + `</div>`;
+}
 function renderExplain(){
   const el = document.getElementById("tab-explain");
   const fixtures = (state.data?.fixtures||[]);
@@ -829,8 +865,8 @@ function renderActive() {
   else if (name === "results") { renderResults(); refreshLive(); }
   else if (name === "tracking") renderTracking();
   else if (name === "schedina") renderSchedina();
-  else if (name === "ai") renderAI();
-  else if (name === "explain") renderExplain();
+  else if (name === "ai") renderAIInsights();
+  else if (name === "teams") renderTeams();
   else if (name === "standings") renderStandings();
 }
 
