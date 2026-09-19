@@ -167,6 +167,7 @@ function predictionBlock(fx) {
     html += `<div class="kv"><span class="muted">Gol da entrambe (BTTS):</span>
       <b>sì ${(btts.si * 100).toFixed(0)}% · no ${(btts.no * 100).toFixed(0)}%</b></div>`;
   }
+  html += `<div style="margin-top:10px"><button class="cta" style="padding:7px 12px; font-size:12px;" onclick="switchTab('explain'); setTimeout(()=>explainMatch('${esc(fx.home)} - ${esc(fx.away)}'),150)">🤖 Perché questo pronostico?</button></div>`;
   const pickRows = Object.keys(picks);
   if (pickRows.length) {
     html += `<div style="margin-top:8px"><b>Pronostico del modello:</b></div>`;
@@ -772,6 +773,55 @@ function populateRoundFilter(){
   sel.value = cur;
 }
 
+function renderExplain(){
+  const el = document.getElementById("tab-explain");
+  const fixtures = (state.data?.fixtures||[]);
+  if(!fixtures.length){ el.innerHTML=`<div class="card muted">Nessuna partita disponibile.</div>`; return; }
+  const opts = fixtures.map(f=> `<option value="${esc(f.home)} - ${esc(f.away)}">${esc(f.home)} - ${esc(f.away)} · Giornata ${esc(f.round||"?")}</option>`).join("");
+  el.innerHTML = `
+    <div class="card ai-card">
+      <div class="section-title">🤖 Perché questo pronostico?</div>
+      <p class="muted">Scegli una partita e l'AI ti spiega il motivo del pronostico con dati reali (forma, xG, quote, morale).</p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin:12px 0;">
+        <select id="explain-select" style="flex:1; min-width:220px;">${opts}</select>
+        <button class="cta" onclick="explainSelected()">Spiega pronostico</button>
+      </div>
+      <div id="explain-log" class="ai-log"></div>
+      <div class="ai-suggest" style="margin-top:12px">
+        ${fixtures.slice(0,4).map(f=> `<button class="ai-chip" onclick="explainMatch('${esc(f.home)} - ${esc(f.away)}')">Perché ${esc(f.home)} - ${esc(f.away)}?</button>`).join(" ")}
+      </div>
+    </div>`;
+}
+function explainMatch(match){
+  const sel = document.getElementById("explain-select");
+  if(sel) sel.value = match;
+  explainSelected();
+}
+async function explainSelected(){
+  const sel = document.getElementById("explain-select");
+  const match = sel ? sel.value : "";
+  if(!match) return;
+  const log = document.getElementById("explain-log");
+  log.insertAdjacentHTML("beforeend", `<div class="ai-line user">${esc(match)}</div><div class="ai-line bot"><span class="muted">Analizzo il pronostico…</span></div>`);
+  log.scrollTop = log.scrollHeight;
+  try{
+    const q = `Spiega in italiano il motivo del pronostico per ${match}: probabilità, gol attesi, forma, morale e quote. Sii dettagliato ma sintetico.`;
+    const r = await fetch("/api/ask", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({question: q})});
+    const res = await r.json();
+    let html = `<b>${esc(res.intro||"Motivo del pronostico")}</b>`;
+    for(const l of res.lines||[]) html+=`<div style="margin-top:6px">${esc(l)}</div>`;
+    for(const it of res.items||[]){
+      const tagCls = it.tag==="alert"?"alert":it.tag==="warn"?"warn":it.tag==="value"?"v":"gray";
+      html+=`<div class="ai-item"><span class="chip ${tagCls}">${esc((it.tag||"info").toUpperCase())}</span> <b>${esc(it.title)}</b><div class="muted">${esc(it.text)}</div></div>`;
+    }
+    const nodes = log.querySelectorAll(".ai-line.bot");
+    if(nodes.length) nodes[nodes.length-1].innerHTML = html;
+    log.scrollTop = log.scrollHeight;
+  }catch(e){
+    const nodes = log.querySelectorAll(".ai-line.bot");
+    if(nodes.length) nodes[nodes.length-1].innerHTML = `<span class="muted">Errore AI.</span>`;
+  }
+}
 function renderActive() {
   const active = document.querySelector("#tabs button.active");
   const name = active ? active.dataset.tab : "matches";
@@ -780,8 +830,8 @@ function renderActive() {
   else if (name === "tracking") renderTracking();
   else if (name === "schedina") renderSchedina();
   else if (name === "ai") renderAI();
+  else if (name === "explain") renderExplain();
   else if (name === "standings") renderStandings();
-  else if (name === "sources") renderSources();
 }
 
 function showSkeleton() {
