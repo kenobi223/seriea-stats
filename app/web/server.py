@@ -207,6 +207,33 @@ def create_app(store: Store, tunnel=None):
             return jsonify({"available": False, "running": False, "url": None})
         return jsonify({"available": tunnel.available, **tunnel.status()})
 
+    @app.get("/api/tg-info")
+    def api_tg_info():
+        """Link al bot Telegram per il bottone sul sito."""
+        link = config.TELEGRAM_BOT_LINK
+        if link:
+            return jsonify({"link": link})
+        # prova a ricavare username dal bot se già online (store live)
+        username = store.get("tg_username")
+        if username:
+            # username già con @
+            handle = username.lstrip("@")
+            return jsonify({"link": f"https://t.me/{handle}"})
+        return jsonify({"link": None})
+
+    @app.get("/telegram")
+    def telegram_redirect():
+        """Redirect diretto a Telegram per /telegram."""
+        from flask import redirect
+        link = config.TELEGRAM_BOT_LINK
+        if not link:
+            username = store.get("tg_username")
+            if username:
+                link = f"https://t.me/{username.lstrip('@')}"
+        if link:
+            return redirect(link, code=302)
+        return jsonify({"error": "Telegram bot non configurato (TELEGRAM_BOT_LINK)"}), 404
+
     @app.get("/api/net-test")
     def api_net_test():
         """Test diretto (no Tor) dei host dati: utile per saggiare quale

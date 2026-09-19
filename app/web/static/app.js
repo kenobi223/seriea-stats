@@ -646,7 +646,22 @@ function renderAI() {
   initAI();
 }
 
-// ------------------------------------------------------------- tunnel
+// ------------------------------------------------------------- tunnel + telegram
+async function renderTelegramLink() {
+  const a = document.getElementById("tg-link");
+  if (!a) return;
+  try {
+    const r = await fetch("/api/tg-info");
+    const d = await r.json();
+    if (d.link) {
+      a.href = d.link;
+      a.style.display = "inline-flex";
+    } else {
+      // se non configurato, nascondi bottone
+      a.style.display = "none";
+    }
+  } catch { a.style.display = "none"; }
+}
 async function renderTunnel() {
   const box = document.getElementById("tunnel-box");
   if (!box) return;
@@ -721,4 +736,5 @@ poll();
 setInterval(poll, REFRESH_MS);
 setInterval(refreshLive, LIVE_REFRESH_MS);
 renderTunnel();
+renderTelegramLink();
 setInterval(renderTunnel, 15000);

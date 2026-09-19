@@ -211,6 +211,10 @@ DEFAULT_PORT = int(os.environ.get("PORT") or "8765")
 # del bot Telegram. Lasciare vuoto per nascondere il bottone.
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 
+# Link diretto al bot Telegram (t.me/...). Se vuoto, il sito prova a ricavarlo
+# dall'username del bot a runtime via /api/tg-info.
+TELEGRAM_BOT_LINK = os.environ.get("TELEGRAM_BOT_LINK", "").rstrip("/")
+
 # Bot Telegram: token da @BotFather (lasciare vuoto per disabilitare).
 # TELEGRAM_ALLOWED_IDS = lista di chat_id autorizzati; vuota = tutti.
 # In env può essere una stringa "id1,id2,...".

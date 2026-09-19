@@ -936,6 +936,11 @@ class TelegramBot:
         if me and me.get("username"):
             self.username = "@" + me["username"]
             log.info("Telegram bot %s online", self.username)
+            try:
+                self.store.set("tg_username", self.username)
+                self.store.save()
+            except:
+                pass
         while self._running:
             updates = self._call("getUpdates",
                                  {"timeout": 30, "offset": self._offset},
