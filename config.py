@@ -171,7 +171,7 @@ SOFASCORE_BASE = "https://www.sofascore.com/api/v1"
 #   espn      : stagione, classifica, risultati, partite, live, quote 1X2
 #               (Bet365) + forma/h2h da calendario squadre. Risponde da Render.
 DATA_SOURCE_ORDER = [s.strip() for s in os.environ.get(
-    "DATA_SOURCE_ORDER", "lega,espn,sofascore").split(",") if s.strip()]
+    "DATA_SOURCE_ORDER", "espn,sofascore").split(",") if s.strip()]
 # Sofascore è bloccato (403) da IP datacenter/Render e ogni sua chiamata
 # resta in retry Tor bloccando il ciclo: lo escludiamo SOLO su Render/Koyeb,
 # in locale (con Tor funzionante) resta disponibile per dati ricchi.
