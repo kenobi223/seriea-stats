@@ -26,6 +26,17 @@ T = {
         "menu_stopsegui": "🔕 Ferma follow",
         "menu_donazioni": "⭐ Donazioni",
         "menu_sito": "🌐 Vai al sito web",
+        "media_off": "Comando non disponibile.",
+        "media_title": "▶️ Media in diretta\n\n"
+                       "Aggiungi questo addon a Stremio o Nuvio per vedere "
+                       "i contenuti in diretta:\n\n"
+                       "{url}\n\n"
+                       "Come fare:\n"
+                       "1) Copia l'URL qui sopra\n"
+                       "2) Apri Stremio/Nuvio sul telefono (Android · iOS)\n"
+                       "3) Vai in Addons → incolla l'URL → Installa",
+        "media_note": "\n\nℹ️ Il server media e la rete Tailscale devono essere "
+                      "accesi per vedere i contenuti.",
         "menu_menu": "🏠 Menu",
         "disclaimer": ("⚠️ I pronostici sono SOLO stime statistiche, NON sono consigli "
                        "finanziari né risultati sicuri: anche il modello sbaglia. "
