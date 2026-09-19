@@ -3,8 +3,20 @@
 const REFRESH_MS = 30000;
 const LIVE_REFRESH_MS = 10000;
 
-const state = { data: null };
+const state = { data: null, favs: JSON.parse(localStorage.getItem("seriea_favs")||"[]"), filterText: "", filterRound: "", favOnly: false, sortBy: "time" };
 const tabs = document.querySelectorAll("#tabs button");
+function isFav(team){ return state.favs.includes(team); }
+function toggleFav(team){
+  const i = state.favs.indexOf(team);
+  if(i>=0) state.favs.splice(i,1); else state.favs.push(team);
+  localStorage.setItem("seriea_favs", JSON.stringify(state.favs));
+  renderActive();
+}
+function shareText(text){
+  if(navigator.share) navigator.share({title:"Serie A Stats", text}).catch(()=>{});
+  else if(navigator.clipboard) { navigator.clipboard.writeText(text); alert("Copiato!"); }
+  else prompt("Copia:", text);
+}
 
 function esc(s) {
   return String(s == null ? "" : s)
@@ -132,8 +144,8 @@ function predictionBlock(fx) {
   let html = "";
   if (Object.keys(prob).length) {
     const p1 = (prob["1"] * 100) || 0, px = (prob["x"] * 100) || 0, p2 = (prob["2"] * 100) || 0;
-    html += `<div class="prob-bar">
-      <div style="width:${p1}%;background:var(--accent)">${p1.toFixed(0)}%</div>
+    html += `<div class="prob-bar" title="Clicca per copiare">
+      <div style="width:${p1}%;background:var(--accent); cursor:pointer;" onclick="shareText('Pronostico ${esc(fx.home)}-${esc(fx.away)}: 1 ${p1.toFixed(0)}% X ${px.toFixed(0)}% 2 ${p2.toFixed(0)}%')" title="Condividi">${p1.toFixed(0)}%</div>
       <div style="width:${px}%;background:#6e7681">${px.toFixed(0)}%</div>
       <div style="width:${p2}%;background:var(--alert)">${p2.toFixed(0)}%</div>
     </div>`;
@@ -192,31 +204,52 @@ function predictionBlock(fx) {
   return html || `<div class="muted">Nessun pronostico.</div>`;
 }
 
+function filteredFixtures(){
+  let fx = (state.data.fixtures || []);
+  if(state.filterRound) fx = fx.filter(f => String(f.round)===state.filterRound);
+  if(state.filterText){
+    const q = state.filterText.toLowerCase();
+    fx = fx.filter(f => (f.home+f.away+f.venue).toLowerCase().includes(q));
+  }
+  if(state.favOnly) fx = fx.filter(f => isFav(f.home)||isFav(f.away));
+  if(state.sortBy==="prob") fx = [...fx].sort((a,b)=> (b.predictions?.["1x2"]?.["1"]||0)-(a.predictions?.["1x2"]?.["1"]||0));
+  else if(state.sortBy==="round") fx = [...fx].sort((a,b)=> (a.round||99)-(b.round||99));
+  else fx = [...fx].sort((a,b)=> (a.start_ts||0)-(b.start_ts||0));
+  return fx;
+}
 function renderMatches() {
   const el = document.getElementById("tab-matches");
-  const fixtures = (state.data.fixtures || []).filter(f => f.status !== "finished" || true);
+  const fixtures = filteredFixtures();
   if (!fixtures.length) {
-    el.innerHTML = `<div class="muted">Nessuna partita in calendario.</div>`;
+    el.innerHTML = `<div class="card muted">Nessuna partita con questi filtri. <button class="ghost" onclick="document.getElementById('search').value=''; state.filterText=''; state.filterRound=''; renderMatches()">Azzera</button></div>`;
     return;
   }
-  el.innerHTML = `<div class="section-title">Prossime giornate · ${fixtures.length} partite</div>`;
+  el.innerHTML = `<div class="section-title">Prossime giornate · ${fixtures.length} partite ${state.favOnly?'⭐ preferiti':''}</div>`;
   for (const fx of fixtures) {
+    const favH = isFav(fx.home), favA = isFav(fx.away);
+    const prob = fx.predictions?.["1x2"] || {};
+    const share = `${fx.home} - ${fx.away} · pronostico ${(prob["1"]||0*100).toFixed? '':''} - vedi su Serie A Stats`;
     el.insertAdjacentHTML("beforeend", `
-      <div class="card">
-        <div class="match-head">
-          <div class="teams">${esc(fx.home)} <span class="muted">-</span> ${esc(fx.away)}</div>
-          <div class="meta">${fmtTime(fx.start_ts)} · Giornata ${esc(fx.round || "?")}${fx.venue ? " · " + esc(fx.venue) : ""}</div>
-        </div>
-        <div class="grid2" style="margin-top:12px">
-          <div class="subpanel"><h3>Pronostico modello</h3>${predictionBlock(fx)}</div>
-          <div>
-            <div class="subpanel"><h3>Quote confrontate</h3>${oddsTable(fx)}</div>
+      <div class="card" style="position:relative; overflow:hidden;">
+        <div class="match-head" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'" style="cursor:pointer;">
+          <div class="teams">${esc(fx.home)} <span class="muted">-</span> ${esc(fx.away)}
+            <button onclick="event.stopPropagation(); toggleFav('${esc(fx.home)}')" class="ghost" style="padding:2px 8px; font-size:12px; border-color:${favH?'var(--warn)':'var(--border)'}">${favH?'★':'☆'} ${esc(fx.home)}</button>
+            <button onclick="event.stopPropagation(); toggleFav('${esc(fx.away)}')" class="ghost" style="padding:2px 8px; font-size:12px; border-color:${favA?'var(--warn)':'var(--border)'}">${favA?'★':'☆'} ${esc(fx.away)}</button>
           </div>
+          <div class="meta">${fmtTime(fx.start_ts)} · Giornata ${esc(fx.round || "?")}${fx.venue ? " · " + esc(fx.venue) : ""} <span style="margin-left:8px; cursor:pointer;" onclick="event.stopPropagation(); shareText('${esc(fx.home)} - ${esc(fx.away)}: pronostico dal modello Serie A Stats')">↗ Condividi</span></div>
         </div>
-        <div class="grid3" style="margin-top:12px">
-          <div class="subpanel"><h3>${esc(fx.home)}</h3>${formBlock(fx, "home")}</div>
-          <div class="subpanel"><h3>${esc(fx.away)}</h3>${formBlock(fx, "away")}</div>
-          <div class="subpanel"><h3>🎭 Morale & conferenze</h3>${moraleBlock(fx, "home")}${moraleBlock(fx, "away")}</div>
+        <div class="match-body">
+          <div class="grid2" style="margin-top:12px">
+            <div class="subpanel"><h3>Pronostico modello</h3>${predictionBlock(fx)}</div>
+            <div>
+              <div class="subpanel"><h3>Quote confrontate</h3>${oddsTable(fx)}</div>
+            </div>
+          </div>
+          <div class="grid3" style="margin-top:12px">
+            <div class="subpanel"><h3>${esc(fx.home)}</h3>${formBlock(fx, "home")}</div>
+            <div class="subpanel"><h3>${esc(fx.away)}</h3>${formBlock(fx, "away")}</div>
+            <div class="subpanel"><h3>🎭 Morale & conferenze</h3>${moraleBlock(fx, "home")}${moraleBlock(fx, "away")}</div>
+          </div>
         </div>
       </div>`);
   }
@@ -479,13 +512,25 @@ async function toggleHits(card) {
 }
 
 // ------------------------------------------------------------- standings
+let standingsSort = { key: "position", dir: 1 };
 function renderStandings() {
   const el = document.getElementById("tab-standings");
-  const rows = state.data.standings || [];
+  let rows = [...(state.data.standings || [])];
   if (!rows.length) {
     el.innerHTML = `<div class="muted">Nessun dato.</div>`;
     return;
   }
+  // filtro ricerca anche in classifica
+  if(state.filterText){
+    const q = state.filterText.toLowerCase();
+    rows = rows.filter(r => r.name.toLowerCase().includes(q));
+  }
+  // ordinamento cliccabile
+  rows.sort((a,b)=>{
+    const vA = a[standingsSort.key] ?? 0, vB = b[standingsSort.key] ?? 0;
+    if(typeof vA==="string") return standingsSort.dir * vA.localeCompare(vB);
+    return standingsSort.dir * (vA - vB);
+  });
   const teams = new Map(rows.map(r => [r.team_id, r]));
   const fixtures = state.data.fixtures || [];
   const formByTeam = new Map();
@@ -493,17 +538,22 @@ function renderStandings() {
     formByTeam.set(fx.home_id, fx.form_home);
     formByTeam.set(fx.away_id, fx.form_away);
   }
-  el.innerHTML = `<div class="card"><table>
-    <thead><tr><th>#</th><th>Squadra</th><th>G</th><th>V</th><th>N</th><th>P</th><th>GF</th><th>GA</th><th>Pt</th><th>Ultime 5</th></tr></thead><tbody>` +
+  function th(label, key){
+    const arrow = standingsSort.key===key ? (standingsSort.dir===1?" ▲":" ▼") : "";
+    return `<th style="cursor:pointer; user-select:none;" onclick="standingsSort.key='${key}'; standingsSort.dir*=-1; renderStandings()">${label}${arrow}</th>`;
+  }
+  el.innerHTML = `<div class="card" style="overflow:auto;"><table>
+    <thead><tr>${th("#","position")}${th("Squadra","name")}${th("G","played")}${th("V","wins")}${th("N","draws")}${th("P","losses")}${th("GF","gf")}${th("GA","ga")}${th("Pt","points")}<th>Ultime 5</th><th>⭐</th></tr></thead><tbody>` +
     rows.map(r => {
       const f = formByTeam.get(r.team_id);
       const last = f ? (f.last_results || []).slice(-5).map(e => chipFrom(resultCharMap(e.result) || "?")).join("") : "";
-      return `<tr><td class="pos-chip">${r.position}</td><td>${esc(r.name)}</td>
+      const fav = isFav(r.name);
+      return `<tr style="${fav?'background:rgba(251,191,36,.08);':''}"><td class="pos-chip">${r.position}</td><td><b>${esc(r.name)}</b> ${fav?'⭐':''}</td>
         <td>${r.played}</td><td>${r.wins}</td><td>${r.draws}</td><td>${r.losses}</td>
         <td>${r.gf}</td><td>${r.ga}</td><td><b>${r.points}</b></td>
-        <td><span class="chips">${last}</span></td></tr>`;
+        <td><span class="chips">${last}</span></td><td><button class="ghost" style="padding:2px 8px;" onclick="toggleFav('${esc(r.name)}'); renderStandings()">${fav?'★':'☆'}</button></td></tr>`;
     }).join("") +
-    `</tbody></table></div>`;
+    `</tbody></table><div class="muted" style="margin-top:8px">Clicca sulle intestazioni per ordinare · ⭐ preferiti salvati localmente</div></div>`;
 }
 
 // ------------------------------------------------------------- sources
@@ -700,6 +750,27 @@ function switchTab(name) {
 }
 
 tabs.forEach(b => b.addEventListener("click", () => switchTab(b.dataset.tab)));
+// controlli globali
+document.getElementById("search")?.addEventListener("input", e=>{ state.filterText=e.target.value; renderActive(); });
+document.getElementById("filter-round")?.addEventListener("change", e=>{ state.filterRound=e.target.value; renderActive(); });
+document.getElementById("fav-toggle")?.addEventListener("click", e=>{
+  state.favOnly=!state.favOnly;
+  e.target.style.background = state.favOnly ? "var(--warn)" : "";
+  e.target.style.color = state.favOnly ? "#070a14" : "";
+  renderActive();
+});
+document.getElementById("sort-toggle")?.addEventListener("click", ()=>{
+  state.sortBy = state.sortBy==="prob" ? "time" : state.sortBy==="time" ? "round" : "prob";
+  renderMatches();
+});
+function populateRoundFilter(){
+  const sel = document.getElementById("filter-round");
+  if(!sel || !state.data) return;
+  const rounds = [...new Set((state.data.fixtures||[]).map(f=>f.round).filter(Boolean))].sort((a,b)=>a-b);
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Tutte le giornate</option>' + rounds.map(r=>`<option value="${r}">Giornata ${r}</option>`).join("");
+  sel.value = cur;
+}
 
 function renderActive() {
   const active = document.querySelector("#tabs button.active");
@@ -726,6 +797,7 @@ async function poll() {
     const r = await fetch("/api/state");
     state.data = await r.json();
     renderHeader();
+    populateRoundFilter();
     renderActive();
   } catch (e) {
     document.getElementById("cycle-status").textContent = "connessione al server interrotta";

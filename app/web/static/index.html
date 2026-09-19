@@ -38,6 +38,16 @@
     <button data-tab="sources">Fonti</button>
   </nav>
 
+  <div id="controls" style="max-width:1220px; margin:14px auto 0; padding:0 20px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+    <div style="position:relative; flex:1; min-width:220px;">
+      <input id="search" placeholder="🔍 Cerca squadra o partita..." style="width:100%; padding:10px 14px 10px 36px;">
+      <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); opacity:.5;">⌕</span>
+    </div>
+    <select id="filter-round" style="min-width:140px;"><option value="">Tutte le giornate</option></select>
+    <button id="fav-toggle" class="ghost" title="Mostra solo preferiti">⭐ Preferiti</button>
+    <button id="sort-toggle" class="ghost" title="Ordina">⇅ Ordina</button>
+  </div>
+
   <main>
     <section class="tab active" id="tab-matches"></section>
     <section class="tab" id="tab-results"></section>
