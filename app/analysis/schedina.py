@@ -27,9 +27,15 @@ def current_round(store):
     """Numero della giornata corrente, derivato dalla classifica.
 
     ESPN non espone il numero di giornata: lo ricaviamo dalle partite già
-    giocate (max ``played`` in classifica + 1)."""
+    giocate. Con le squadre tutte a ``played`` uguali il turno è chiuso e la
+    corrente è ``max(played)+1``; con ``played`` diseguali il turno è in
+    corso e la corrente è ``max(played)`` (altrimenti la schedina sarebbe
+    ricostruita a metà turno appena finisce la prima partita)."""
     played = [(r.get("played") or 0) for r in store.get("standings", [])]
-    return int(max(played) + 1) if played else None
+    if not played:
+        return None
+    mn, mx = min(played), max(played)
+    return int(mx) if mn != mx else int(mx + 1)
 
 
 def assign_rounds(store, fixtures, anchor=None):
@@ -51,7 +57,7 @@ def assign_rounds(store, fixtures, anchor=None):
     for f in fixtures:
         ts = f.get("start_ts")
         if ts:
-            f["round"] = rnd + (ts - anchor) // config.MATCHDAY_SPACING
+            f["round"] = rnd + round((ts - anchor) / config.MATCHDAY_SPACING)
     return fixtures
 
 
