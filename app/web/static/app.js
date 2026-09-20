@@ -228,8 +228,6 @@ function renderMatches() {
   el.innerHTML = `<div class="section-title">Prossime giornate · ${fixtures.length} partite ${state.favOnly?'⭐ preferiti':''}</div>`;
   for (const fx of fixtures) {
     const favH = isFav(fx.home), favA = isFav(fx.away);
-    const prob = fx.predictions?.["1x2"] || {};
-    const share = `${fx.home} - ${fx.away} · pronostico ${(prob["1"]||0*100).toFixed? '':''} - vedi su Serie A Stats`;
     el.insertAdjacentHTML("beforeend", `
       <div class="card" style="position:relative; overflow:hidden;">
         <div class="match-head" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'" style="cursor:pointer;">
@@ -808,25 +806,6 @@ function renderTeams(){
       </div>`;
     }).join("") + `</div>`;
 }
-function renderExplain(){
-  const el = document.getElementById("tab-explain");
-  const fixtures = (state.data?.fixtures||[]);
-  if(!fixtures.length){ el.innerHTML=`<div class="card muted">Nessuna partita disponibile.</div>`; return; }
-  const opts = fixtures.map(f=> `<option value="${esc(f.home)} - ${esc(f.away)}">${esc(f.home)} - ${esc(f.away)} · Giornata ${esc(f.round||"?")}</option>`).join("");
-  el.innerHTML = `
-    <div class="card ai-card">
-      <div class="section-title">🤖 Perché questo pronostico?</div>
-      <p class="muted">Scegli una partita e l'AI ti spiega il motivo del pronostico con dati reali (forma, xG, quote, morale).</p>
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin:12px 0;">
-        <select id="explain-select" style="flex:1; min-width:220px;">${opts}</select>
-        <button class="cta" onclick="explainSelected()">Spiega pronostico</button>
-      </div>
-      <div id="explain-log" class="ai-log"></div>
-      <div class="ai-suggest" style="margin-top:12px">
-        ${fixtures.slice(0,4).map(f=> `<button class="ai-chip" onclick="explainMatch('${esc(f.home)} - ${esc(f.away)}')">Perché ${esc(f.home)} - ${esc(f.away)}?</button>`).join(" ")}
-      </div>
-    </div>`;
-}
 function explainMatch(match){
   const sel = document.getElementById("explain-select");
   if(sel) sel.value = match;
@@ -881,6 +860,7 @@ async function poll() {
   try {
     const r = await fetch("/api/state");
     state.data = await r.json();
+    hitsLoaded = false;
     renderHeader();
     populateRoundFilter();
     renderActive();
