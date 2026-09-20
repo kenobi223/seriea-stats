@@ -17,6 +17,7 @@ from app.core import kv
 
 log = logging.getLogger("notify")
 _send_lock = threading.Lock()
+StartedLock = threading.Lock()
 
 _LBL = {"1": "1 (vittoria casa)", "x": "X (pareggio)", "2": "2 (vittoria ospite)",
         "over_2.5": "Over 2.5", "under_2.5": "Under 2.5",
@@ -46,12 +47,13 @@ def seed_started():
 
 
 def register_started(chat_id):
-    started = load_started()
-    if chat_id in started:
-        return
-    started.append(chat_id)
-    kv.write_json("started.json", started)
-    log.info("chat %s registrata agli avvisi pronostici", chat_id)
+    with StartedLock:
+        started = load_started()
+        if chat_id in started:
+            return
+        started.append(chat_id)
+        kv.write_json("started.json", started)
+        log.info("chat %s registrata agli avvisi pronostici", chat_id)
 
 
 def _send_photo(chat_id, photo_path, caption):

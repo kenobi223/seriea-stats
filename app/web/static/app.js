@@ -167,7 +167,7 @@ function predictionBlock(fx) {
     html += `<div class="kv"><span class="muted">Gol da entrambe (BTTS):</span>
       <b>sì ${(btts.si * 100).toFixed(0)}% · no ${(btts.no * 100).toFixed(0)}%</b></div>`;
   }
-  html += `<div style="margin-top:10px"><button class="cta" style="padding:7px 12px; font-size:12px;" onclick="switchTab('explain'); setTimeout(()=>explainMatch('${esc(fx.home)} - ${esc(fx.away)}'),150)">🤖 Perché questo pronostico?</button></div>`;
+  html += `<div style="margin-top:10px"><button class="cta" style="padding:7px 12px; font-size:12px;" onclick="switchTab('ai'); setTimeout(()=>explainMatch('${esc(fx.home)} - ${esc(fx.away)}'),150)">🤖 Perché questo pronostico?</button></div>`;
   const pickRows = Object.keys(picks);
   if (pickRows.length) {
     html += `<div style="margin-top:8px"><b>Pronostico del modello:</b></div>`;
@@ -636,7 +636,6 @@ async function askAI(question) {
   if (!question) return;
   const input = document.getElementById("ai-input");
   if (input) input.value = "";
-  initAI();
   aiLine("user", esc(question));
   aiLine("bot", `<div class="muted">Analizzo i dati…</div>`);
   try {

@@ -46,23 +46,26 @@ def _league_avg(standings, all_forms):
     played = sum(r.get("played") or 0 for r in standings) or 1
     scored = sum(r.get("gf") or 0 for r in standings)
     conceded = sum(r.get("ga") or 0 for r in standings)
-    home_gf, away_gf, count = 0.0, 0.0, 0
+    home_gf, away_gf, home_count, away_count = 0.0, 0.0, 0, 0
     for f in all_forms:
         for r in f.get("home_results", []) or []:
             try:
-                home_gf += float(r["score"].split("-")[0])
-            except (ValueError, KeyError):
+                parts = r["score"].split("-")
+                home_gf += float(parts[0])
+            except (ValueError, KeyError, IndexError):
                 continue
-            count += 1
+            home_count += 1
         for r in f.get("away_results", []) or []:
             try:
-                away_gf += float(r["score"].split("-")[1])
-            except (ValueError, KeyError):
+                parts = r["score"].split("-")
+                away_gf += float(parts[1])
+            except (ValueError, KeyError, IndexError):
                 continue
+            away_count += 1
     return {
         "scored": scored / played, "conceded": conceded / played,
-        "home": (home_gf / count if count else 1.30),
-        "away": (away_gf / count if count else 1.05),
+        "home": (home_gf / home_count if home_count else 1.30),
+        "away": (away_gf / away_count if away_count else 1.05),
     }
 
 
@@ -134,8 +137,16 @@ def run_cycle(store):
     # salva subito i dati core: tengono vivo lo stato anche se le fasi
     # analitiche successive (forma/h2h) restano in attesa per retry.
     store.set("fixtures", assign_rounds(
-        store, [fx.to_dict() for fx in sorted(now_fx, key=lambda x: x.start_ts)]))
+        store, [fx.to_dict() for fx in sorted(now_fx, key=lambda x: x.start_ts or 0)]))
     store.save()
+
+    # sincronizza round assegnato dai dict ai Fixture objects
+    fixtures_data = store.get("fixtures", [])
+    round_map = {d.get("id"): d.get("round") for d in fixtures_data}
+    for fx in now_fx:
+        r = round_map.get(fx.id)
+        if r is not None:
+            fx.round = r
 
     # ---- quote aggiornate a ogni ciclo (10 min)
     for fx in now_fx:

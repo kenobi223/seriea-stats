@@ -531,7 +531,8 @@ class TelegramBot:
             text = tr._t("stop_ok_all")
         else:
             removed = remove_follow(chat_id, [target])
-            text = tr._t("stop_ok", teams=", ".join(removed))
+            text = tr._t("stop_ok", teams=", ".join(removed)) if removed \
+                else tr._t("stop_none")
         self._edit_or_send(chat_id, message_id, text, _menu_kb(tr))
 
     def _segui(self, chat_id, arg):
@@ -939,7 +940,7 @@ class TelegramBot:
             try:
                 self.store.set("tg_username", self.username)
                 self.store.save()
-            except:
+            except Exception:
                 pass
         while self._running:
             updates = self._call("getUpdates",

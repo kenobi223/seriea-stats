@@ -106,7 +106,7 @@ def create_app(store: Store, tunnel=None):
                 cid = int(request.headers.get("X-Chat-Id") or 0)
                 if cid not in (config.TELEGRAM_OWNER_IDS or []):
                     return jsonify({"error": "unauthorized"}), 401
-            except:
+            except (ValueError, TypeError):
                 return jsonify({"error": "unauthorized"}), 401
         from app.analysis import tracker
         payload = request.get_json(silent=True) or {}
@@ -161,7 +161,7 @@ def create_app(store: Store, tunnel=None):
                 cid = int(request.headers.get("X-Chat-Id") or 0)
                 if cid not in (config.TELEGRAM_OWNER_IDS or []):
                     return jsonify({"error": "unauthorized"}), 401
-            except:
+            except (ValueError, TypeError):
                 return jsonify({"error": "unauthorized"}), 401
         from app.analysis import schedina
         from app import notify
