@@ -253,43 +253,78 @@ def reject_pending(proposal_id):
     return True, "rifiutato"
 
 def _git_push(msg):
+    """Push via GitHub REST API - nessun bisogno di git binario nel container."""
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_PAT")
     if not token:
         log.warning("maintenance: no GITHUB_TOKEN, skip push")
         return False, "no GITHUB_TOKEN"
-    remote = None
+    repo = os.environ.get("GITHUB_REPO", "kenobi223/seriea-stats")
+    branch = os.environ.get("GITHUB_BRANCH", "main")
+    headers = {"Authorization": "token %s" % token, "Accept": "application/vnd.github.v3+json"}
+    base = "https://api.github.com"
     try:
-        subprocess.run(["git", "config", "user.email", "bot@seriea-stats.local"], check=True, timeout=10)
-        subprocess.run(["git", "config", "user.name", "seriea-maintenance-bot"], check=True, timeout=10)
-        subprocess.run(["git", "add", "-A"], check=True, timeout=10)
-        res = subprocess.run(["git", "diff", "--cached", "--quiet"])
-        if res.returncode == 0:
-            log.warning("maintenance: nulla da committare dopo git add -A")
-            return False, "git diff vuoto"
-        subprocess.run(["git", "commit", "-m", msg], check=True, timeout=10)
-        remote = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True, timeout=10).stdout.strip()
-        if "github.com" in remote:
-            askpass = pathlib.Path(__file__).resolve().parent.parent / "_git_askpass.sh"
-            askpass.write_text("#!/bin/sh\necho '%s'" % token, encoding="utf-8")
-            askpass.chmod(0o700)
-            env = os.environ.copy()
-            env["GIT_ASKPASS"] = str(askpass)
-            try:
-                result = subprocess.run(["git", "push"], capture_output=True, text=True, timeout=30, env=env)
-                if result.returncode != 0:
-                    err = result.stderr.strip()
-                    log.warning("maintenance: git push fallito (rc=%d): %s", result.returncode, err)
-                    return False, "push fallito: %s" % err[:200]
-                log.info("maintenance: autodeploy push ok: %s", msg)
-                return True, "push ok"
-            finally:
-                askpass.unlink(missing_ok=True)
-        else:
-            return False, "remote non è github.com: %s" % remote
+        # 1. Get current commit SHA
+        r = requests.get("%s/repos/%s/git/ref/heads/%s" % (base, repo, branch), headers=headers, timeout=15)
+        if r.status_code != 200:
+            return False, "get ref fallito: %d %s" % (r.status_code, r.text[:200])
+        current_sha = r.json()["object"]["sha"]
+
+        # 2. Get commit to find tree SHA
+        r = requests.get("%s/repos/%s/git/commits/%s" % (base, repo, current_sha), headers=headers, timeout=15)
+        if r.status_code != 200:
+            return False, "get commit fallito: %d" % r.status_code
+        tree_sha = r.json()["tree"]["sha"]
+
+        # 3. Read files to commit
+        base_dir = pathlib.Path(__file__).resolve().parent.parent
+        files_to_commit = []
+        for p in ["app/web/static/sw.js", "app/web/static/manifest.json"]:
+            fp = base_dir / p
+            if fp.exists():
+                content = fp.read_bytes()
+                files_to_commit.append({"path": p, "content": content})
+
+        if not files_to_commit:
+            return False, "nessun file da committare"
+
+        # 4. Create blobs
+        blobs = []
+        for f in files_to_commit:
+            r = requests.post("%s/repos/%s/git/blobs" % (base, repo),
+                              headers=headers, timeout=15,
+                              json={"content": f["content"].decode("utf-8", errors="replace"), "encoding": "utf-8"})
+            if r.status_code != 201:
+                return False, "blob fallito per %s: %d" % (f["path"], r.status_code)
+            blobs.append({"path": f["path"], "mode": "100644", "type": "blob", "sha": r.json()["sha"]})
+
+        # 5. Create tree
+        r = requests.post("%s/repos/%s/git/trees" % (base, repo),
+                          headers=headers, timeout=15,
+                          json={"base_tree": tree_sha, "tree": blobs})
+        if r.status_code != 201:
+            return False, "tree fallito: %d" % r.status_code
+        new_tree_sha = r.json()["sha"]
+
+        # 6. Create commit
+        r = requests.post("%s/repos/%s/git/commits" % (base, repo),
+                          headers=headers, timeout=15,
+                          json={"message": msg, "tree": new_tree_sha, "parents": [current_sha]})
+        if r.status_code != 201:
+            return False, "commit fallito: %d %s" % (r.status_code, r.text[:200])
+        new_commit_sha = r.json()["sha"]
+
+        # 7. Update ref
+        r = requests.patch("%s/repos/%s/git/refs/heads/%s" % (base, repo, branch),
+                           headers=headers, timeout=15,
+                           json={"sha": new_commit_sha, "force": True})
+        if r.status_code != 200:
+            return False, "update ref fallito: %d" % r.status_code
+
+        log.info("maintenance: GitHub API push ok: %s (%s)", msg, new_commit_sha[:8])
+        return True, "push ok via GitHub API"
     except Exception as e:
-        log.warning("maintenance: push fallito: %s", e)
+        log.warning("maintenance: GitHub API push fallito: %s", e)
         return False, "eccezione: %s" % str(e)[:200]
-    return False, "sconosciuto"
 
 def _latest_webdev_ideas():
     """Cerca ultime novità webdev nei forum (Hacker News RSS) per ispirare chicche."""
