@@ -599,7 +599,7 @@ class MuseSparkAgent(threading.Thread):
 
     def _joint_reasoning(self, issues, news):
         """Due ingegneri ragionano insieme: fix utili, sicuri + chicche modernizzazione."""
-        real_issues = [i for i in issues if i.startswith("fixtures") or i.startswith("giornate") or "tracking" in i]
+        real_issues = [i for i in issues if i.startswith("fixtures") or i.startswith("giornate") or "tracking" in i or "[Mimo]" in i]
         analysis = [i for i in issues if i.startswith("✅") or i.startswith("❌") or i.startswith("Team")]
         chicche = [i for i in issues if i.startswith("💡")]
         # whitelist allargata ingegneri: includono migliorie PWA, design, codice pronostici
@@ -611,6 +611,12 @@ class MuseSparkAgent(threading.Thread):
             "service worker": "aggiungi service worker per PWA offline iPhone/Android",
             "registrazione": "aggiungi auth leggera sito",
             "View Transitions": "aggiungi View Transitions API",
+            "[Mimo] L'API": "verifica endpoint API e rimuovi test localhost",
+            "[Mimo] Ma /api": "verifica endpoint API e rimuovi test localhost",
+            "[Mimo] non risponde": "verifica endpoint API e rimuovi test localhost",
+            "[Mimo] vuoto": "verifica dati sorgente",
+            "[Mimo] senza pronostico": "ricalcola pronostici",
+            "[Mimo] incomplete": "verifica classifica completa",
         }
         fixes = []
         for iss in real_issues + chicche:

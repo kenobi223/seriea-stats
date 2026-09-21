@@ -23,7 +23,14 @@ from app.core import kv
 log = logging.getLogger("mimo_agent")
 
 COMPLAINTS_FILE = "mimo_complaints.json"
-BASE_URL = os.environ.get("APP_URL", "http://localhost:5000")
+BASE_URL = os.environ.get("APP_URL", "")
+if not BASE_URL:
+    # su Render l'URL è sempre https://<servizio>.onrender.com
+    _svc = os.environ.get("RENDER_EXTERNAL_URL", "")
+    if _svc:
+        BASE_URL = _svc
+    else:
+        BASE_URL = "http://localhost:5000"
 
 # frasi da utente arrabbiato
 RAGE_INTROS = [
