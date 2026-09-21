@@ -366,4 +366,19 @@ def create_app(store: Store, tunnel=None):
             results["risultati"] = {"error": str(e)[:200]}
         return jsonify(results)
 
+    @app.get("/api/test-footballgpt")
+    def api_test_footballgpt():
+        from app.analysis.footballgpt import predict_match, _load_models
+        loaded = _load_models()
+        if not loaded:
+            return jsonify({"error": "Modelli non caricati"})
+        fixtures = store.get("fixtures", [])
+        if not fixtures:
+            return jsonify({"error": "Nessuna fixture disponibile"})
+        fx = fixtures[0]
+        home = fx.get("home_team") or fx.get("home", "")
+        away = fx.get("away_team") or fx.get("away", "")
+        result = predict_match(home, away, None)
+        return jsonify({"home": home, "away": away, "result": result})
+
     return app
