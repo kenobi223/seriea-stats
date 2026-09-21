@@ -110,13 +110,14 @@ def main():
     else:
         bot = None
 
-    # Dual-AI maintenance: Big Pickle 20' + Muse Spark 1.3 35' (solo se non --once)
+    # Dual-AI maintenance: Big Pickle 5' + Muse Spark 8' + Daily report 23:55 (solo se non --once)
     if not args.once and not args.no_scheduler:
         try:
-            from app.maintenance import BigPickleAgent, MuseSparkAgent
+            from app.maintenance import BigPickleAgent, MuseSparkAgent, DailyReportAgent
             BigPickleAgent(store).start()
             MuseSparkAgent(store).start()
-            print("  Manutenzione dual-AI: Big Pickle 20' + Muse Spark 1.3 35' attivi")
+            DailyReportAgent().start()
+            print("  Manutenzione dual-AI: Big Pickle 5' + Muse Spark 8' + report giornaliero 23:55 attivi")
         except Exception as e:
             logging.getLogger("maintenance").warning("dual-AI non avviato: %s", e)
 

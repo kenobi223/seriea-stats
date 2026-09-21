@@ -23,6 +23,57 @@ from app.core import kv
 
 log = logging.getLogger("maintenance")
 
+def _send_daily_summary():
+    """A fine giornata (23:55) manda a @Ziosapi un txt con tutto ciò che si sono detti i due agenti."""
+    state = _read()
+    checks = state.get("checks") or []
+    if not checks:
+        return
+    # filtra solo oggi
+    today = time.strftime("%Y-%m-%d")
+    lines = [f"Report giornaliero Serie A Stats - {today}", "="*40, ""]
+    for c in checks[-30:]:
+        by = c.get("by")
+        at = time.strftime("%H:%M", time.localtime(c.get("at", 0)))
+        issues = c.get("issues") or c.get("joint", {}).get("issues") or []
+        fixes = c.get("fixed") or c.get("joint", {}).get("fixes") or []
+        ideas = c.get("ideas") or c.get("joint", {}).get("ideas") or []
+        lines.append(f"[{at}] {by}")
+        if issues:
+            lines.append("  Problemi: " + "; ".join(str(i)[:80] for i in issues[:3]))
+        if fixes:
+            lines.append("  Fix: " + ", ".join(fixes))
+        if ideas:
+            lines.append("  Idee: " + ideas[0][:80])
+        lines.append("")
+    text = "\n".join(lines)
+    # salva txt
+    path = os.path.join(config.DATA_DIR, f"daily_{today}.txt")
+    try:
+        os.makedirs(config.DATA_DIR, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+    except Exception as e:
+        log.warning("daily txt save: %s", e)
+        return
+    # invia come documento a @Ziosapi
+    token = config.TELEGRAM_BOT_TOKEN
+    if not token:
+        return
+    targets = list(config.TELEGRAM_OWNER_IDS) if config.TELEGRAM_OWNER_IDS else ["@Ziosapi"]
+    for chat_id in targets:
+        try:
+            url = f"https://api.telegram.org/bot{token}/sendDocument"
+            with open(path, "rb") as f:
+                requests.post(url, data={"chat_id": chat_id, "caption": f"📄 Report giornaliero {today} - Big Pickle + Muse Spark"}, files={"document": (f"report_{today}.txt", f)}, timeout=15)
+            log.info("daily report inviato a %s", chat_id)
+        except Exception as e:
+            # fallback testo se documento fallisce
+            try:
+                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": text[:4000]}, timeout=10)
+            except:
+                log.warning("daily report %s: %s", chat_id, e)
+
 def _notify_owner_proposal(proposal):
     """Manda proposta a @Ziosapi con tasti OK/Rifiuta."""
     token = config.TELEGRAM_BOT_TOKEN
@@ -237,6 +288,34 @@ class BigPickleAgent(threading.Thread):
             state["pending_fix"] = True
             log.warning("Big Pickle ingegnere 20' rileva + idee %s: %s", ideas[0], "; ".join(issues[:2]))
         _write(state)
+
+class DailyReportAgent(threading.Thread):
+    """Ogni giorno alle 23:55 - invia txt riassunto a @Ziosapi."""
+    def __init__(self):
+        super().__init__(daemon=True, name="daily-report")
+    def run(self):
+        log.info("Daily report agent avviato (23:55)")
+        sent_today = None
+        while True:
+            now = time.localtime()
+            # invia tra 23:55 e 00:05, una sola volta al giorno
+            if now.tm_hour == 23 and now.tm_min >= 55:
+                today = time.strftime("%Y-%m-%d")
+                if sent_today != today:
+                    try:
+                        _send_daily_summary()
+                        sent_today = today
+                    except Exception as e:
+                        log.exception("daily report: %s", e)
+            elif now.tm_hour == 0 and now.tm_min < 5 and sent_today is None:
+                # se il server era spento alle 23:55, prova a 00:02
+                today = time.strftime("%Y-%m-%d", time.localtime(time.time()-3600))
+                try:
+                    _send_daily_summary()
+                    sent_today = today
+                except:
+                    pass
+            time.sleep(60)
 
 class MuseSparkAgent(threading.Thread):
     """Ogni 35' - ingegnere senior, deep fix + modernizza design/code con chicche."""
