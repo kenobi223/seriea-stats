@@ -191,12 +191,13 @@ class EspnClient:
         return (comp.get("id"), self._team_name(hid), self._team_name(aid),
                 hid, aid, ts if ts is not None else _epoch(comp.get("date")), None)
 
-    def next_fixtures(self, season_id, days=10):
+    def next_fixtures(self, season_id, days=14):
         rows = []
         now = time.time()
         for comp in self._events(0, days):
             ts = _epoch(comp.get("date"))
-            if ts < now - 3600 or ts > now + days * 86400:
+            # allarga finestra e non scarta subito i finiti di oggi (servono per chiudere la 5ª)
+            if ts < now - 6*3600 or ts > now + days * 86400:
                 continue
             row = self._row(comp, ts)
             if row:
@@ -209,7 +210,7 @@ class EspnClient:
         if now - self._results_cache[0] < 600:
             return self._results_cache[1]
         matches = []
-        for comp in self._events(-14, 0, with_odds=False):
+        for comp in self._events(-21, 0, with_odds=False):
             st = _status_name((comp.get("status") or {}).get("name"))
             if st != "finished":
                 continue

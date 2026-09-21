@@ -102,7 +102,7 @@ def run_cycle(store):
     # ---- riallinea calendario
     prev = {f["id"]: _restore_fixture(f) for f in store.get("fixtures", [])}
     now_fx = []
-    next_rows = client.next_fixtures(season_id, days=config.UPDATE_INTERVAL_SECONDS > 0 and 10 or 10)
+    next_rows = client.next_fixtures(season_id, days=14)
     for row in next_rows:
         event_id = row[0]
         fx = prev.get(event_id)
@@ -114,9 +114,17 @@ def run_cycle(store):
             fx.start_ts = row[5]
             detail = client.event_detail(event_id)
             if detail:
+                # forza finished se è passato >3h dal fischio (ESPN a volte resta notstarted)
+                if detail.get("status") == "notstarted" and detail.get("start_ts") and time.time() - detail["start_ts"] > 3*3600:
+                    detail["status"] = "finished"
                 fx.status = detail.get("status", fx.status)
                 fx.venue = detail.get("venue", fx.venue)
+                # se ESPN dice ancora notstarted ma è passato, marca finished localmente
+                if fx.status == "notstarted" and fx.start_ts and time.time() - fx.start_ts > 3*3600:
+                    fx.status = "finished"
         now_fx.append(fx)
+        # se una fixture in stato finished è finita da >3h, spostala subito in results al prossimo ciclo
+        now_fx = [fx for fx in now_fx if fx.status != "finished" or time.time() - (fx.start_ts or 0) < 24*3600]
 
     # ---- ESPN non espone il numero di giornata: lo deriviamo dalla
     #      classifica (max(played)+1) e dalla data, sia per i fixtures
