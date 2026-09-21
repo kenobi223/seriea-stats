@@ -410,6 +410,17 @@ class BigPickleAgent(threading.Thread):
         fixtures = data.get("fixtures") or []
         results = data.get("results") or []
         tracking = data.get("tracking") or {}
+        # --- lamentele di Mimo v2.5 Free (QA tester) ---
+        try:
+            from app.analysis.mimo_agent import _load_complaints
+            mimo = _load_complaints()
+            mimo_complaints = (mimo.get("complaints") or [])[-10:]
+            for mc in mimo_complaints:
+                sev = mc.get("severity", "low")
+                prefix = "🔴" if sev == "critical" else "🟡" if sev == "high" else "⚪"
+                issues.append(f"{prefix} [Mimo] {mc.get('message', '')}")
+        except Exception:
+            pass
         if not fixtures:
             issues.append("fixtures vuote (0 partite) - finestra ESPN troppo corta o pausa finita")
         rounds = sorted({m.get("round") for rnd in results for m in rnd.get("matches",[]) if m.get("round") is not None})
@@ -509,6 +520,17 @@ class MuseSparkAgent(threading.Thread):
     def tick(self):
         state = _read()
         issues = (state.get("big_pickle") or {}).get("issues") or []
+        # --- lamentele di Mimo v2.5 Free ---
+        try:
+            from app.analysis.mimo_agent import _load_complaints
+            mimo = _load_complaints()
+            mimo_complaints = (mimo.get("complaints") or [])[-10:]
+            for mc in mimo_complaints:
+                sev = mc.get("severity", "low")
+                prefix = "🔴" if sev == "critical" else "🟡" if sev == "high" else "⚪"
+                issues.append(f"{prefix} [Mimo] {mc.get('message', '')}")
+        except Exception:
+            pass
         if not state.get("pending_fix") and not issues:
             log.info("Muse Spark 35' check: tutto ok")
             return

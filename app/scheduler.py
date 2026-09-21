@@ -374,6 +374,14 @@ class Scheduler:
     def start(self):
         thread = threading.Thread(target=self._loop, daemon=True)
         thread.start()
+        # avvia Mimo v2.5 Free QA tester (24/7)
+        try:
+            from app.analysis.mimo_agent import MimoAgent
+            mimo = MimoAgent(self.store)
+            mimo.start()
+            log.info("Mimo v2.5 Free QA agent avviato")
+        except Exception as e:
+            log.warning("Mimo agent non avviato: %s", e)
         return self
 
     def stop(self):

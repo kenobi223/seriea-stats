@@ -366,6 +366,23 @@ def create_app(store: Store, tunnel=None):
             results["risultati"] = {"error": str(e)[:200]}
         return jsonify(results)
 
+    @app.get("/api/test-mimo")
+    def api_test_mimo():
+        from app.analysis.mimo_agent import _load_complaints, _check_api_health, _check_fixtures, _check_standings, _check_predictions
+        complaints = []
+        complaints.extend(_check_api_health())
+        complaints.extend(_check_fixtures(store))
+        complaints.extend(_check_standings(store))
+        complaints.extend(_check_predictions(store))
+        saved = _load_complaints()
+        return jsonify({
+            "new_complaints": len(complaints),
+            "total_saved": len(saved.get("complaints", [])),
+            "critical": sum(1 for c in complaints if c.get("severity") == "critical"),
+            "complaints": complaints[:20],
+            "stats": saved.get("stats", {}),
+        })
+
     @app.get("/api/test-footballgpt")
     def api_test_footballgpt():
         from app.analysis.footballgpt import predict_match, _load_models
