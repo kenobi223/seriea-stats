@@ -473,12 +473,11 @@ class DailyReportAgent(threading.Thread):
     def __init__(self):
         super().__init__(daemon=True, name="daily-report")
     def run(self):
-        log.info("Daily report agent avviato (23:55)")
+        log.info("Daily report agent avviato (20:00)")
         sent_today = None
         while True:
             now = time.localtime()
-            # invia tra 23:55 e 00:05, una sola volta al giorno
-            if now.tm_hour == 23 and now.tm_min >= 55:
+            if now.tm_hour == 20 and now.tm_min < 5:
                 today = time.strftime("%Y-%m-%d")
                 if sent_today != today:
                     try:
@@ -486,9 +485,9 @@ class DailyReportAgent(threading.Thread):
                         sent_today = today
                     except Exception as e:
                         log.exception("daily report: %s", e)
-            elif now.tm_hour == 0 and now.tm_min < 5 and sent_today is None:
-                # se il server era spento alle 23:55, prova a 00:02
-                today = time.strftime("%Y-%m-%d", time.localtime(time.time()-3600))
+            elif now.tm_hour == 20 and now.tm_min < 5 and sent_today is None:
+                # se il server era spento alle 20:00, prova a 20:02
+                today = time.strftime("%Y-%m-%d")
                 try:
                     _send_daily_summary()
                     sent_today = today
