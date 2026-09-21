@@ -11,10 +11,32 @@ import threading
 import time
 import subprocess
 
+import requests
+
 import config
 from app.core import kv
 
 log = logging.getLogger("maintenance")
+
+def _notify_owner(text):
+    """Manda messaggio elementare a @Ziosapi (owner) via bot."""
+    token = config.TELEGRAM_BOT_TOKEN
+    if not token:
+        return
+    # owner chat_id se configurato, altrimenti prova @Ziosapi
+    targets = list(config.TELEGRAM_OWNER_IDS) if config.TELEGRAM_OWNER_IDS else []
+    if not targets:
+        # fallback: prova username (funziona se è chat con bot)
+        targets = ["@Ziosapi"]
+    for chat_id in targets:
+        try:
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            # messaggio elementare
+            simple = f"🔧 Aggiornamento bot Serie A:\n\n{text}\n\nTutto ok, fatto da Big Pickle + Muse Spark."
+            requests.post(url, json={"chat_id": chat_id, "text": simple}, timeout=10)
+            log.info("maintenance: notificato @Ziosapi %s", chat_id)
+        except Exception as e:
+            log.warning("notify @Ziosapi %s: %s", chat_id, e)
 
 STATE_FILE = "maintenance.json"
 LOCK = threading.Lock()
@@ -151,6 +173,8 @@ class MuseSparkAgent(threading.Thread):
         state["pending_fix"] = False
         _write(state)
         if fixed:
+            # notifica elementare a @Ziosapi prima del push
+            _notify_owner("Ho sistemato: " + ", ".join(fixed) + ". News viste: " + joint.get("news","nessuna"))
             _git_push("chore: maintenance dual-AI 20'/35' - joint safe fix: " + ", ".join(fixed))
 
     def _joint_reasoning(self, issues, news):
