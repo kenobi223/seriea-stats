@@ -318,12 +318,11 @@ def create_app(store: Store, tunnel=None):
 
     @app.get("/api/debug-codegen")
     def api_debug_codegen():
-        """Test codegen: verifica API key e chiama LLM con fix semplice."""
-        from app.analysis.codegen import _api_key, GEMINI_URL, MODELS, SYSTEM_PROMPT, _parse_response
+        from app.analysis.codegen import _api_key, DEEPSEEK_URL, MODELS, SYSTEM_PROMPT, _parse_response
         import requests as req
         key = _api_key()
         if not key:
-            return jsonify({"error": "GEMINI_API_KEY non impostata", "key_set": False})
+            return jsonify({"error": "DEEPSEEK_API_KEY non impostata", "key_set": False})
         headers = {"Authorization": "Bearer %s" % key, "Content-Type": "application/json"}
         results = {}
         for model in MODELS:
@@ -337,27 +336,19 @@ def create_app(store: Store, tunnel=None):
                 "temperature": 0.2,
             }
             try:
-                r = req.post(GEMINI_URL, json=payload, headers=headers, timeout=30)
+                r = req.post(DEEPSEEK_URL, json=payload, headers=headers, timeout=30)
                 raw = r.json()
-                # Gemini potrebbe usare un formato diverso
                 text = ""
                 choices = raw.get("choices") or []
                 if choices and isinstance(choices[0], dict):
                     msg = choices[0].get("message") or {}
                     text = msg.get("content", "")
-                elif "candidates" in raw:
-                    # formato Gemini nativo
-                    cands = raw["candidates"]
-                    if cands and isinstance(cands[0], dict):
-                        parts = cands[0].get("content", {}).get("parts", [])
-                        text = parts[0].get("text", "") if parts else ""
                 parsed = _parse_response(text) if text else []
                 results[model] = {
                     "status": r.status_code,
                     "raw_len": len(text),
                     "raw_preview": text[:500] if text else "",
                     "parsed": len(parsed),
-                    "full_response": raw if r.status_code != 200 else "",
                 }
             except Exception as e:
                 results[model] = {"error": str(e)[:200]}

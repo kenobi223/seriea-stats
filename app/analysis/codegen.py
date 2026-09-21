@@ -14,8 +14,8 @@ import requests
 
 log = logging.getLogger("codegen")
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-MODELS = ["gemini-2.0-flash", "gemini-2.5-flash"]
+DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
+MODELS = ["deepseek-chat"]
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 STATIC = PROJECT_ROOT / "app" / "web" / "static"
@@ -55,7 +55,7 @@ REGOLE:
 
 
 def _api_key():
-    return os.environ.get("GEMINI_API_KEY")
+    return os.environ.get("DEEPSEEK_API_KEY")
 
 
 def _read_files(paths):
@@ -142,7 +142,7 @@ def generate_fix(request, relevant_files=None):
         }
         for attempt in range(2):
             try:
-                resp = requests.post(GEMINI_URL, json=payload, headers=headers, timeout=60)
+                resp = requests.post(DEEPSEEK_URL, json=payload, headers=headers, timeout=60)
                 if resp.status_code in (503, 504, 502):
                     time.sleep(2 * (attempt + 1))
                     continue
