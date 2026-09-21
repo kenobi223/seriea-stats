@@ -316,4 +316,22 @@ def create_app(store: Store, tunnel=None):
             out["espn_results"] = {"all": -1, "err": str(e)[:200]}
         return jsonify(out)
 
+    @app.get("/api/debug-codegen")
+    def api_debug_codegen():
+        """Test codegen: verifica API key e chiama LLM con fix semplice."""
+        from app.analysis.codegen import _api_key, generate_fix
+        key = _api_key()
+        if not key:
+            return jsonify({"error": "OPENCODE_API_KEY non impostata", "key_set": False})
+        try:
+            changes = generate_fix("cambia il colore del body in rosso")
+            return jsonify({
+                "key_set": True,
+                "key_len": len(key),
+                "changes": [{"path": c["path"], "content_len": len(c["content"])} for c in changes],
+                "num_changes": len(changes),
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)[:500], "key_set": True})
+
     return app
