@@ -81,9 +81,10 @@ _APPLY_MAP = {
 
 def _apply_fixes(fixes):
     """Fix descrittive → file reali. Prima whitelist, poi LLM per fix custom.
-    Ritorna (applied, has_new)."""
+    Ritorna (applied, has_new, modified_files)."""
     applied = []
     has_new = False
+    modified_files = []
     for fix in fixes:
         key = fix.strip().lower()
         # 1. prova whitelist
@@ -99,6 +100,10 @@ def _apply_fixes(fixes):
                 applied.append({"fix": fix, "result": msg, "changed": changed})
                 if changed:
                     has_new = True
+                    if "sw.js" in msg:
+                        modified_files.append("app/web/static/sw.js")
+                    if "manifest" in msg:
+                        modified_files.append("app/web/static/manifest.json")
                 continue
             except Exception as e:
                 log.error("fix whitelist fallita: %s → %s", fix, e)
@@ -117,13 +122,15 @@ def _apply_fixes(fixes):
                     applied.append({"fix": fix, "result": ch["path"], "changed": changed})
                     if changed:
                         has_new = True
+                        if ch["path"] not in modified_files:
+                            modified_files.append(ch["path"])
             else:
                 log.warning("codegen: nessuna modifica generata per '%s'", fix)
                 applied.append({"fix": fix, "result": "LLM nessuna modifica", "changed": False})
         except Exception as e:
             log.error("codegen fallito per '%s': %s", fix, e)
             applied.append({"fix": fix, "result": "errore LLM: %s" % str(e)[:100], "changed": False})
-    return applied, has_new
+    return applied, has_new, modified_files
 
 def _send_daily_summary():
     """A fine giornata (23:55) manda a @Ziosapi un txt con tutto ciò che si sono detti i due agenti."""
@@ -241,10 +248,13 @@ def approve_pending(proposal_id):
     if pending.get("status") != "pending":
         return False, "proposta già gestita"
     fixes = pending.get("fixes") or []
-    # crea i file reali PRIMA del push (altrimenti git diff è vuoto)
-    applied, has_new = _apply_fixes(fixes)
-    # push SEMPRE dopo _apply_fixes: il timestamp in sw.js garantisce un diff
-    push_ok, push_msg = _git_push("chore: maintenance dual-AI approved by @Ziosapi - " + ", ".join(fixes))
+    # LLM genera i file reali PRIMA del push
+    applied, has_new, modified_files = _apply_fixes(fixes)
+    # push i file modificati (non solo sw.js/manifest!)
+    push_ok, push_msg = _git_push(
+        "feat: /opencode - " + ", ".join(fixes),
+        files=modified_files if modified_files else None
+    )
     pending["status"] = "approved"
     pending["decided_at"] = int(time.time())
     history = state.get("approved_history") or []
@@ -254,7 +264,12 @@ def approve_pending(proposal_id):
     state["pending_fix"] = False
     state["last_approved_fix"] = fixes
     _write(state)
-    _notify_owner("✅ Approvato! Ho pushato: %s. Deploy in corso." % ", ".join(fixes) if push_ok else "⚠️ Approvato ma push fallito: %s\n\nDettaglio: %s" % (", ".join(fixes), push_msg))
+    # mostra all'utente cosa ha fatto l'AI
+    file_list = ", ".join(modified_files) if modified_files else "nessun file"
+    if push_ok:
+        _notify_owner("✅ AI ha modificato: %s\n\nPush: %s\nDeploy in corso." % (file_list, push_msg))
+    else:
+        _notify_owner("⚠️ AI ha scritto: %s\n\nPush fallito: %s" % (file_list, push_msg))
     return True, "approvato" if push_ok else "approvato (push fallito: %s)" % push_msg
 
 def reject_pending(proposal_id):
@@ -275,8 +290,8 @@ def reject_pending(proposal_id):
     _notify_owner(f"❌ Rifiutato: {', '.join(pending.get('fixes') or [])}. Non lo ripropongo a meno che non trovi di meglio.")
     return True, "rifiutato"
 
-def _git_push(msg):
-    """Push via GitHub REST API - nessun bisogno di git binario nel container."""
+def _git_push(msg, files=None):
+    """Push via GitHub REST API. files = lista di path relativi da committare."""
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_PAT")
     if not token:
         log.warning("maintenance: no GITHUB_TOKEN, skip push")
@@ -284,24 +299,26 @@ def _git_push(msg):
     repo = os.environ.get("GITHUB_REPO", "kenobi223/seriea-stats")
     branch = os.environ.get("GITHUB_BRANCH", "main")
     headers = {"Authorization": "token %s" % token, "Accept": "application/vnd.github.v3+json"}
-    base = "https://api.github.com"
+    base_url = "https://api.github.com"
     try:
         # 1. Get current commit SHA
-        r = requests.get("%s/repos/%s/git/ref/heads/%s" % (base, repo, branch), headers=headers, timeout=15)
+        r = requests.get("%s/repos/%s/git/ref/heads/%s" % (base_url, repo, branch), headers=headers, timeout=15)
         if r.status_code != 200:
             return False, "get ref fallito: %d %s" % (r.status_code, r.text[:200])
         current_sha = r.json()["object"]["sha"]
 
-        # 2. Get commit to find tree SHA
-        r = requests.get("%s/repos/%s/git/commits/%s" % (base, repo, current_sha), headers=headers, timeout=15)
+        # 2. Get tree SHA
+        r = requests.get("%s/repos/%s/git/commits/%s" % (base_url, repo, current_sha), headers=headers, timeout=15)
         if r.status_code != 200:
             return False, "get commit fallito: %d" % r.status_code
         tree_sha = r.json()["tree"]["sha"]
 
         # 3. Read files to commit
         base_dir = pathlib.Path(__file__).resolve().parent.parent
+        if not files:
+            files = ["app/web/static/sw.js", "app/web/static/manifest.json"]
         files_to_commit = []
-        for p in ["app/web/static/sw.js", "app/web/static/manifest.json"]:
+        for p in files:
             fp = base_dir / p
             if fp.exists():
                 content = fp.read_bytes()
@@ -313,7 +330,7 @@ def _git_push(msg):
         # 4. Create blobs
         blobs = []
         for f in files_to_commit:
-            r = requests.post("%s/repos/%s/git/blobs" % (base, repo),
+            r = requests.post("%s/repos/%s/git/blobs" % (base_url, repo),
                               headers=headers, timeout=15,
                               json={"content": f["content"].decode("utf-8", errors="replace"), "encoding": "utf-8"})
             if r.status_code != 201:
@@ -321,7 +338,7 @@ def _git_push(msg):
             blobs.append({"path": f["path"], "mode": "100644", "type": "blob", "sha": r.json()["sha"]})
 
         # 5. Create tree
-        r = requests.post("%s/repos/%s/git/trees" % (base, repo),
+        r = requests.post("%s/repos/%s/git/trees" % (base_url, repo),
                           headers=headers, timeout=15,
                           json={"base_tree": tree_sha, "tree": blobs})
         if r.status_code != 201:
@@ -329,7 +346,7 @@ def _git_push(msg):
         new_tree_sha = r.json()["sha"]
 
         # 6. Create commit
-        r = requests.post("%s/repos/%s/git/commits" % (base, repo),
+        r = requests.post("%s/repos/%s/git/commits" % (base_url, repo),
                           headers=headers, timeout=15,
                           json={"message": msg, "tree": new_tree_sha, "parents": [current_sha]})
         if r.status_code != 201:
@@ -337,14 +354,14 @@ def _git_push(msg):
         new_commit_sha = r.json()["sha"]
 
         # 7. Update ref
-        r = requests.patch("%s/repos/%s/git/refs/heads/%s" % (base, repo, branch),
+        r = requests.patch("%s/repos/%s/git/refs/heads/%s" % (base_url, repo, branch),
                            headers=headers, timeout=15,
                            json={"sha": new_commit_sha, "force": True})
         if r.status_code != 200:
             return False, "update ref fallito: %d" % r.status_code
 
         log.info("maintenance: GitHub API push ok: %s (%s)", msg, new_commit_sha[:8])
-        return True, "push ok via GitHub API"
+        return True, "push ok"
     except Exception as e:
         log.warning("maintenance: GitHub API push fallito: %s", e)
         return False, "eccezione: %s" % str(e)[:200]
