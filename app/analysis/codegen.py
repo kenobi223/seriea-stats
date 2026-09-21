@@ -62,10 +62,10 @@ def _read_files(paths):
         if fp.exists():
             try:
                 content = fp.read_text(encoding="utf-8", errors="replace")
-                # limita a 400 righe per file per non esaurire i token
+                # limita a 150 righe per file per velocizzare
                 lines = content.splitlines()
-                if len(lines) > 400:
-                    content = "\n".join(lines[:400]) + "\n... (troncato, %d righe totali)" % len(lines)
+                if len(lines) > 150:
+                    content = "\n".join(lines[:150]) + "\n... (troncato, %d righe totali)" % len(lines)
                 parts.append(f"=== {p} ===\n{content}\n=== FINE {p} ===")
             except Exception as e:
                 log.warning("lettura %s: %s", p, e)
@@ -134,7 +134,7 @@ def generate_fix(request, relevant_files=None):
             "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
             "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
             "generationConfig": {
-                "maxOutputTokens": 16384,
+                "maxOutputTokens": 8192,
                 "temperature": 0.2,
             },
         }
