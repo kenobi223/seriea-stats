@@ -14,8 +14,8 @@ import requests
 
 log = logging.getLogger("codegen")
 
-GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-MODELS = ["gemini-3.6-flash"]
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 STATIC = PROJECT_ROOT / "app" / "web" / "static"
@@ -55,7 +55,7 @@ REGOLE:
 
 
 def _api_key():
-    return os.environ.get("GEMINI_API_KEY")
+    return os.environ.get("GROQ_API_KEY")
 
 
 def _read_files(paths):
@@ -131,18 +131,18 @@ def generate_fix(request, relevant_files=None):
     user_msg = "RICHIEDI: %s\n\nFILE ATTUALI:\n%s" % (request, context)
 
     for model in MODELS:
-        url = "%s/%s:generateContent?key=%s" % (GEMINI_BASE, model, key)
         payload = {
-            "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
-            "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-            "generationConfig": {
-                "maxOutputTokens": 8192,
-                "temperature": 0.2,
-            },
+            "model": model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            "max_tokens": 8192,
+            "temperature": 0.2,
         }
         for attempt in range(3):
             try:
-                resp = requests.post(url, json=payload, timeout=90)
+                resp = requests.post(GROQ_URL, json=payload, headers=headers, timeout=90)
                 if resp.status_code in (503, 504, 502, 429):
                     log.warning("codegen %s HTTP %s (tentativo %d)", model, resp.status_code, attempt + 1)
                     time.sleep(3 * (attempt + 1))
@@ -158,10 +158,10 @@ def generate_fix(request, relevant_files=None):
             continue
         data = resp.json()
         text = ""
-        candidates = data.get("candidates") or []
-        if candidates and isinstance(candidates[0], dict):
-            parts = candidates[0].get("content", {}).get("parts", [])
-            text = parts[0].get("text", "") if parts else ""
+        choices = data.get("choices") or []
+        if choices and isinstance(choices[0], dict):
+            msg = choices[0].get("message") or {}
+            text = msg.get("content", "")
         if not text:
             continue
         changes = _parse_response(text)

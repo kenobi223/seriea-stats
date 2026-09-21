@@ -318,27 +318,31 @@ def create_app(store: Store, tunnel=None):
 
     @app.get("/api/debug-codegen")
     def api_debug_codegen():
-        from app.analysis.codegen import _api_key, GEMINI_BASE, MODELS, SYSTEM_PROMPT, _parse_response
+        from app.analysis.codegen import _api_key, GROQ_URL, MODELS, SYSTEM_PROMPT, _parse_response
         import requests as req
         key = _api_key()
         if not key:
-            return jsonify({"error": "GEMINI_API_KEY non impostata", "key_set": False})
+            return jsonify({"error": "GROQ_API_KEY non impostata", "key_set": False})
+        headers = {"Authorization": "Bearer %s" % key, "Content-Type": "application/json"}
         results = {}
         for model in MODELS:
-            url = "%s/%s:generateContent?key=%s" % (GEMINI_BASE, model, key)
             payload = {
-                "contents": [{"role": "user", "parts": [{"text": "RICHIEDI: cambia il colore del body in rosso\n\nFILE ATTUALI:\n=== app/web/static/style.css ===\nbody { background: #1a1a2e; color: white; }\n=== FINE ==="}]}],
-                "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-                "generationConfig": {"maxOutputTokens": 2000, "temperature": 0.2},
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": "RICHIEDI: cambia il colore del body in rosso\n\nFILE ATTUALI:\n=== app/web/static/style.css ===\nbody { background: #1a1a2e; color: white; }\n=== FINE ==="},
+                ],
+                "max_tokens": 2000,
+                "temperature": 0.2,
             }
             try:
-                r = req.post(url, json=payload, timeout=60)
+                r = req.post(GROQ_URL, json=payload, headers=headers, timeout=30)
                 raw = r.json()
                 text = ""
-                candidates = raw.get("candidates") or []
-                if candidates and isinstance(candidates[0], dict):
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    text = parts[0].get("text", "") if parts else ""
+                choices = raw.get("choices") or []
+                if choices and isinstance(choices[0], dict):
+                    msg = choices[0].get("message") or {}
+                    text = msg.get("content", "")
                 parsed = _parse_response(text) if text else []
                 results[model] = {
                     "status": r.status_code,
