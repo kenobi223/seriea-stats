@@ -127,19 +127,27 @@ def run_cycle(store):
         now_fx = [fx for fx in now_fx if fx.status != "finished" or time.time() - (fx.start_ts or 0) < 24*3600]
 
     # ---- ESPN non espone il numero di giornata: lo deriviamo dalla
-    #      classifica (max(played)+1) e dalla data, sia per i fixtures
-    #      imminenti sia per i risultati già archiviati.
+    #      classifica (max(played)+1) e dalla data solo per i fixtures imminenti.
+    #      I risultati già archiviati hanno già la giornata corretta, non riassegnare
+    #      altrimenti dopo la 5ª diventano 6-9 sballati quando fixtures è vuoto (anchor=None).
     from app.analysis.schedina import assign_rounds
-    fx_anchor = min((f.start_ts for f in now_fx if f.start_ts), default=None)
-    results = []
-    for rnd in (store.get("results") or []):
-        matches = assign_rounds({"standings": store.get("standings")},
-                                rnd.get("matches") or [], anchor=fx_anchor)
-        by_round = {}
-        for m in matches:
-            by_round.setdefault(m.get("round"), []).append(m)
-        for rnum, ms in sorted(by_round.items()):
-            results.append({"round": rnum, "matches": ms})
+    # non toccare i results già salvati - hanno già la giornata giusta da ESPN/assign precedente
+    # solo se sono ancora senza round (None) li assegniamo
+    results = store.get("results") or []
+    need_fix = any(m.get("round") is None for rnd in results for m in rnd.get("matches", []))
+    if need_fix:
+        fx_anchor = min((f.start_ts for f in now_fx if f.start_ts), default=None)
+        fixed = []
+        for rnd in results:
+            matches = rnd.get("matches") or []
+            if any(m.get("round") is None for m in matches):
+                matches = assign_rounds({"standings": store.get("standings")}, matches, anchor=fx_anchor)
+            by_round = {}
+            for m in matches:
+                by_round.setdefault(m.get("round"), []).append(m)
+            for rnum, ms in sorted(by_round.items()):
+                fixed.append({"round": rnum, "matches": ms})
+        results = fixed
     store.set("results", results)
 
     # salva subito i dati core: tengono vivo lo stato anche se le fasi
