@@ -24,7 +24,7 @@ _dicts = None
 
 
 def _load_models():
-    global _xgb_model, _tree_model, __dicts
+    global _xgb_model, _tree_model, _dicts
     if _xgb_model is not None:
         return True
     try:
@@ -34,10 +34,10 @@ def _load_models():
             _tree_model = pickle.load(f)
         with open(_MODELS_DIR / "dicts2translate.pkl", "rb") as f:
             _dicts = pickle.load(f)
-        log.info("FootballGPT: modelli caricati")
+        log.info("FootballGPT: modelli caricati OK (xgb %s)", type(_xgb_model).__name__)
         return True
     except Exception as e:
-        log.warning("FootballGPT: errore caricamento modelli: %s", e)
+        log.error("FootballGPT: errore caricamento modelli: %s [%s]", e, type(e).__name__)
         return False
 
 
