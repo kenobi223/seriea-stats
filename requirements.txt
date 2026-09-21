@@ -8,3 +8,4 @@ firecrawl-py>=1.0
 xgboost>=1.4,<2.0
 scipy>=1.11
 pandas>=2.0
+penaltyblog>=1.12
