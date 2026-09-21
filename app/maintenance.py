@@ -232,7 +232,7 @@ def approve_pending(proposal_id):
     state["last_approved_fix"] = fixes
     _write(state)
     _notify_owner("✅ Approvato! Ho pushato: %s. Deploy in corso." % ", ".join(fixes) if push_ok else "⚠️ Approvato ma push fallito: %s\n\nDettaglio: %s" % (", ".join(fixes), push_msg))
-    return True, "approvato" if ok else "approvato (nulla da pushare)"
+    return True, "approvato" if push_ok else "approvato (push fallito: %s)" % push_msg
 
 def reject_pending(proposal_id):
     state = _read()
