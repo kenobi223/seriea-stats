@@ -963,12 +963,17 @@ class TelegramBot:
             if not changes:
                 self._send(chat_id, "❌ LLM non ha prodotto modifiche valide.", _menu_kb(Tr(chat_id)))
                 return
-            file_list = ", ".join(c.get("path", "?") for c in changes)
-            ok_apply = maint._apply_fixes(changes)
-            if not ok_apply:
-                self._send(chat_id, "❌ Errore applicazione fix.", _menu_kb(Tr(chat_id)))
-                return
-            ok_push, push_msg = maint._git_push("fix: %s" % req, files=[c["path"] for c in changes])
+            import pathlib
+            project_root = pathlib.Path(__file__).resolve().parent.parent
+            applied = []
+            for ch in changes:
+                fp = project_root / ch["path"]
+                fp.parent.mkdir(parents=True, exist_ok=True)
+                fp.write_text(ch["content"], encoding="utf-8")
+                applied.append(ch["path"])
+                log.info("/opencode: scritto %s (%d chars)", ch["path"], len(ch["content"]))
+            file_list = ", ".join(applied)
+            ok_push, push_msg = maint._git_push("opencode: %s" % req, files=applied)
             status = "✅" if ok_push else "⚠️"
             self._send(chat_id, f"{status} Applicato: {file_list}\n{push_msg}", _menu_kb(Tr(chat_id)))
         else:
