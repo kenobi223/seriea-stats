@@ -241,15 +241,35 @@ def create_app(store: Store, tunnel=None):
             return jsonify({"error": "token errato"}), 403
         try:
             from app.maintenance import _notify_owner_proposal
-            proposal = {
-                "id": "test123",
-                "issues": ["fixtures vuote (test)"],
-                "fixes": ["verifica finestra 30gg ok"],
-                "news": "Test mister: Gasperini carica la Roma",
-                "reason": "test manuale - verifica bot @Ziosapi",
-            }
+            is_design = request.args.get("design") == "1"
+            if is_design:
+                proposal = {
+                    "id": "design999",
+                    "issues": ["PWA manifest mancante - sito non installabile su iPhone/Android"],
+                    "fixes": ["aggiungi manifest.json + service worker iPhone/Android"],
+                    "news": "Idea ingegnere: PWA installabile + View Transitions API (da Hacker News)",
+                    "reason": "chicca design ingegnere: migliora installazione mobile, proposta sicura",
+                }
+            else:
+                proposal = {
+                    "id": "test123",
+                    "issues": ["fixtures vuote (test)"],
+                    "fixes": ["verifica finestra 30gg ok"],
+                    "news": "Test mister: Gasperini carica la Roma",
+                    "reason": "test manuale - verifica bot @Ziosapi",
+                }
             _notify_owner_proposal(proposal)
-            return jsonify({"ok": True, "sent_to": config.TELEGRAM_OWNER_IDS or ["@Ziosapi"]})
+            # salva come pending così puoi fare OK/Rifiuta anche sul test design
+            try:
+                from app.maintenance import _read, _write
+                import time
+                state = _read()
+                state["pending_proposal"] = {**proposal, "at": int(time.time()), "status": "pending"}
+                state["pending_fix"] = True
+                _write(state)
+            except:
+                pass
+            return jsonify({"ok": True, "sent_to": config.TELEGRAM_OWNER_IDS or ["@Ziosapi"], "proposal": proposal})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
