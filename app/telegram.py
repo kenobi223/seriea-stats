@@ -951,10 +951,13 @@ class TelegramBot:
                 return
             from app import maintenance as maint
             from app.analysis import codegen
+            log.info("/opencode ricevuto: %s", req)
             self._send(chat_id, f"⏳ Elaboro: {req} ...")
             try:
                 changes = codegen.generate_fix(req)
+                log.info("/opencode generate_fix restituito: %d modifiche", len(changes) if changes else 0)
             except Exception as e:
+                log.warning("/opencode eccezione: %s", e)
                 self._send(chat_id, f"❌ Errore LLM: {e}", _menu_kb(Tr(chat_id)))
                 return
             if not changes:

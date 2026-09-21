@@ -112,10 +112,9 @@ def generate_fix(request, relevant_files=None):
     """
     key = _api_key()
     if not key:
-        log.warning("codegen: GROQ_API_KEY assente")
+        log.warning("codegen: GEMINI_API_KEY assente")
         return []
 
-    # seleziona file rilevanti
     if not relevant_files:
         relevant_files = _pick_relevant_files(request)
 
@@ -124,7 +123,7 @@ def generate_fix(request, relevant_files=None):
         log.warning("codegen: nessun file leggibile da %s", relevant_files)
         return []
 
-    log.info("codegen: richiesta=%s, files=%s, context_len=%d", request, relevant_files, len(context))
+    log.info("codegen: richiesta=%s files=%s context_len=%d", request, relevant_files, len(context))
 
     user_msg = "RICHIEDI: %s\n\nFILE ATTUALI:\n%s" % (request, context)
 
@@ -133,26 +132,24 @@ def generate_fix(request, relevant_files=None):
         payload = {
             "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
             "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-            "generationConfig": {
-                "maxOutputTokens": 8192,
-                "temperature": 0.2,
-            },
+            "generationConfig": {"maxOutputTokens": 8192, "temperature": 0.2},
         }
         for attempt in range(3):
             try:
-                resp = requests.post(url, json=payload, timeout=120)
+                log.info("codegen: %s tentativo %d...", model, attempt + 1)
+                resp = requests.post(url, json=payload, timeout=90)
+                log.info("codegen: %s HTTP %s", model, resp.status_code)
                 if resp.status_code in (503, 504, 502, 429):
-                    log.warning("codegen %s HTTP %s (tentativo %d)", model, resp.status_code, attempt + 1)
                     time.sleep(5 * (attempt + 1))
                     continue
                 break
             except Exception as e:
-                log.warning("codegen %s attempt %d: %s", model, attempt, e)
+                log.warning("codegen: %s errore tentativo %d: %s", model, attempt, e)
                 time.sleep(3)
         else:
             continue
         if resp.status_code != 200:
-            log.warning("codegen %s HTTP %s: %s", model, resp.status_code, resp.text[:300])
+            log.warning("codegen: %s HTTP %s: %s", model, resp.status_code, resp.text[:200])
             continue
         data = resp.json()
         text = ""
@@ -161,14 +158,15 @@ def generate_fix(request, relevant_files=None):
             parts = candidates[0].get("content", {}).get("parts", [])
             text = parts[0].get("text", "") if parts else ""
         if not text:
-            log.warning("codegen %s: risposta vuota", model)
+            log.warning("codegen: %s risposta vuota", model)
             continue
+        log.info("codegen: %s ricevuto %d chars", model, len(text))
         changes = _parse_response(text)
         if changes:
-            log.info("codegen: %s ha generato %d modifiche con %s", request, len(changes), model)
+            log.info("codegen: OK %d modifiche da %s", len(changes), model)
             return changes
-        log.warning("codegen %s: risposta non parsabile, preview: %s", model, text[:300])
-    log.warning("codegen: nessun modello ha prodotto modifiche valide")
+        log.warning("codegen: %s non parsabile: %s", model, text[:200])
+    log.warning("codegen: tutti i modelli falliti")
     return []
 
 
