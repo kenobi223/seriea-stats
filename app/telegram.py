@@ -950,24 +950,24 @@ class TelegramBot:
                 self._send(chat_id, "Usa: /opencode <descrizione fix>", _menu_kb(Tr(chat_id)))
                 return
             from app import maintenance as maint
-            import hashlib
-            state = maint._read()
-            # crea proposta diretta dal capo (bypass joint reasoning)
-            proposal_id = hashlib.md5(req.encode()).hexdigest()[:8]
-            proposal = {
-                "id": proposal_id,
-                "at": int(time.time()),
-                "issues": [f"Richiesta diretta da @Ziosapi: {req}"],
-                "fixes": [req],
-                "news": "richiesta diretta capo",
-                "reason": f"capo ha chiesto: {req}",
-                "status": "pending",
-            }
-            state["pending_proposal"] = proposal
-            state["pending_fix"] = True
-            maint._write(state)
-            maint._notify_owner_proposal(proposal)
-            self._send(chat_id, f"🔧 Proposta creata ({proposal_id}): {req}\nTi mando i tasti OK/Rifiuta.", _menu_kb(Tr(chat_id)))
+            from app.analysis import codegen
+            self._send(chat_id, f"⏳ Elaboro: {req} ...")
+            try:
+                changes = codegen.generate_fix(req)
+            except Exception as e:
+                self._send(chat_id, f"❌ Errore LLM: {e}", _menu_kb(Tr(chat_id)))
+                return
+            if not changes:
+                self._send(chat_id, "❌ LLM non ha prodotto modifiche valide.", _menu_kb(Tr(chat_id)))
+                return
+            file_list = ", ".join(c.get("path", "?") for c in changes)
+            ok_apply = maint._apply_fixes(changes)
+            if not ok_apply:
+                self._send(chat_id, "❌ Errore applicazione fix.", _menu_kb(Tr(chat_id)))
+                return
+            ok_push, push_msg = maint._git_push("fix: %s" % req, files=[c["path"] for c in changes])
+            status = "✅" if ok_push else "⚠️"
+            self._send(chat_id, f"{status} Applicato: {file_list}\n{push_msg}", _menu_kb(Tr(chat_id)))
         else:
             self._send_menu(chat_id)
 
