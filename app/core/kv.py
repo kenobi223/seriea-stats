@@ -33,6 +33,7 @@ KEYS = {
     "ou_alert.json": config.OU_ALERT_FILE,
     "tg_offset.json": os.path.join(config.DATA_DIR, "tg_offset.json"),
     "coaches.json": config.COACHES_FILE,
+    "maintenance.json": os.path.join(config.DATA_DIR, "maintenance.json"),
 }
 
 

@@ -82,14 +82,17 @@ def approve_pending(proposal_id):
         return False, "nessuna proposta in attesa con questo id"
     if pending.get("status") != "pending":
         return False, "proposta già gestita"
-    # esegue push
     fixes = pending.get("fixes") or []
     ok = _git_push("chore: maintenance dual-AI approved by @Ziosapi - " + ", ".join(fixes))
     pending["status"] = "approved"
     pending["decided_at"] = int(time.time())
-    state["pending_proposal"] = pending
+    # sposta in history e pulisci pending per non riproporre subito
+    history = state.get("approved_history") or []
+    history.append(dict(pending))
+    state["approved_history"] = history[-10:]
+    state["pending_proposal"] = None
     state["pending_fix"] = False
-    # pulisci rejected se era stato rifiutato prima ma ora è migliore
+    state["last_approved_fix"] = fixes
     _write(state)
     _notify_owner(f"✅ Approvato! Ho pushato: {', '.join(fixes)}. Deploy in corso." if ok else f"✅ Approvato ma nulla da pushare: {', '.join(fixes)}")
     return True, "approvato" if ok else "approvato (nulla da pushare)"
@@ -230,19 +233,23 @@ class MuseSparkAgent(threading.Thread):
             _write(state)
             return
         fixed = joint.get("fixes") or []
-        # deduplica: se stessa proposta già pending o rifiutata, skip a meno che non sia migliore
+        # deduplica: se stessa proposta già pending/rifiutata/approvata, skip a meno che non sia migliore
         pending = state.get("pending_proposal")
         rejected = set(state.get("rejected_ids") or [])
+        approved = set(p.get("id") for p in (state.get("approved_history") or []) if p.get("id"))
         proposal_id = str(hash(tuple(sorted(fixed))))[:8] if fixed else str(int(time.time()))
-        # se stessa proposta già rifiutata e non è migliore, non riproporre
         if fixed and proposal_id in rejected:
-            # solo se fix è più efficace (più fix) riproponi
             prev_fix_len = len((state.get("last_rejected_fix") or []))
             if len(fixed) <= prev_fix_len:
                 log.info("maintenance: proposta %s già rifiutata, skip", proposal_id)
                 state["muse_spark"] = {"at": int(time.time()), "joint": joint, "fixed": [], "skipped": "già rifiutata"}
                 _write(state)
                 return
+        if fixed and proposal_id in approved:
+            log.info("maintenance: proposta %s già approvata di recente, skip", proposal_id)
+            state["muse_spark"] = {"at": int(time.time()), "joint": joint, "fixed": [], "skipped": "già approvata"}
+            _write(state)
+            return
         if pending and pending.get("status") == "pending":
             log.info("maintenance: proposta %s già in attesa di OK, skip", pending.get("id"))
             return
