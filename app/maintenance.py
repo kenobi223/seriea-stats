@@ -253,7 +253,9 @@ class BigPickleAgent(threading.Thread):
         chicche = []
         if not os.path.exists("app/web/static/manifest.json"):
             chicche.append("💡 Idea ingegnere: aggiungere PWA manifest per installazione iPhone/Android")
-        if "Team" not in str(issues):
+        if not os.path.exists("app/web/static/sw.js") and not os.path.exists("app/web/static/service-worker.js"):
+            chicche.append("💡 Idea ingegnere: aggiungere service worker per PWA offline iPhone/Android")
+        if not chicche and "Team" not in str(issues):
             chicche.append(f"💡 Idea ingegnere: {ideas[0]}")
         # analisi partita per partita
         try:
@@ -418,7 +420,8 @@ class MuseSparkAgent(threading.Thread):
             "fixtures vuote": "verifica finestra 30gg ok",
             "giornate sballate": "results round lock ok",
             "tracking fermo": "trigger evaluate",
-            "PWA manifest": "aggiungi manifest.json + service worker iPhone/Android",
+            "PWA manifest": "aggiungi manifest.json iPhone/Android",
+            "service worker": "aggiungi service worker per PWA offline iPhone/Android",
             "registrazione": "aggiungi auth leggera sito",
             "View Transitions": "aggiungi View Transitions API",
         }
