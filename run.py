@@ -110,6 +110,16 @@ def main():
     else:
         bot = None
 
+    # Dual-AI maintenance: Big Pickle 20' + Muse Spark 1.3 35' (solo se non --once)
+    if not args.once and not args.no_scheduler:
+        try:
+            from app.maintenance import BigPickleAgent, MuseSparkAgent
+            BigPickleAgent(store).start()
+            MuseSparkAgent(store).start()
+            print("  Manutenzione dual-AI: Big Pickle 20' + Muse Spark 1.3 35' attivi")
+        except Exception as e:
+            logging.getLogger("maintenance").warning("dual-AI non avviato: %s", e)
+
     tunnel = Tunnel(args.port, config.DATA_DIR)
 
     if os.environ.get("PUBLIC_URL"):
