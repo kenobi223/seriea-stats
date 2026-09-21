@@ -234,6 +234,25 @@ def create_app(store: Store, tunnel=None):
             return redirect(link, code=302)
         return jsonify({"error": "Telegram bot non configurato (TELEGRAM_BOT_LINK)"}), 404
 
+    @app.get("/api/test-notify")
+    def api_test_notify():
+        """Manda subito un test a @Ziosapi con tasti OK/Rifiuta."""
+        if request.args.get("token") != os.environ.get("MAINTENANCE_TOKEN", "test123"):
+            return jsonify({"error": "token errato"}), 403
+        try:
+            from app.maintenance import _notify_owner_proposal
+            proposal = {
+                "id": "test123",
+                "issues": ["fixtures vuote (test)"],
+                "fixes": ["verifica finestra 30gg ok"],
+                "news": "Test mister: Gasperini carica la Roma",
+                "reason": "test manuale - verifica bot @Ziosapi",
+            }
+            _notify_owner_proposal(proposal)
+            return jsonify({"ok": True, "sent_to": config.TELEGRAM_OWNER_IDS or ["@Ziosapi"]})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     @app.get("/api/test-maintenance")
     def api_test_maintenance():
         """Forza Big Pickle + Muse Spark subito e manda proposta a @Ziosapi."""
