@@ -15,7 +15,7 @@ import requests
 log = logging.getLogger("codegen")
 
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-MODELS = ["gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash"]
+MODELS = ["gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash"]
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 STATIC = PROJECT_ROOT / "app" / "web" / "static"
