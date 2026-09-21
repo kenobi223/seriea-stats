@@ -1,4 +1,4 @@
-/* seriea-stats v2 1789995872 */
+/* seriea-stats v2 1789996138 */
 self.addEventListener('install',e=>self.skipWaiting());
 self.addEventListener('activate',e=>self.clients.claim());
 self.addEventListener('fetch',e=>{

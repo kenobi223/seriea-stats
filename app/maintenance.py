@@ -221,7 +221,7 @@ def approve_pending(proposal_id):
     # crea i file reali PRIMA del push (altrimenti git diff è vuoto)
     applied, has_new = _apply_fixes(fixes)
     # push SEMPRE dopo _apply_fixes: il timestamp in sw.js garantisce un diff
-    ok = _git_push("chore: maintenance dual-AI approved by @Ziosapi - " + ", ".join(fixes))
+    push_ok, push_msg = _git_push("chore: maintenance dual-AI approved by @Ziosapi - " + ", ".join(fixes))
     pending["status"] = "approved"
     pending["decided_at"] = int(time.time())
     history = state.get("approved_history") or []
@@ -231,7 +231,7 @@ def approve_pending(proposal_id):
     state["pending_fix"] = False
     state["last_approved_fix"] = fixes
     _write(state)
-    _notify_owner(f"✅ Approvato! Ho pushato: {', '.join(fixes)}. Deploy in corso." if ok else f"✅ Approvato ma nulla da pushare: {', '.join(fixes)}")
+    _notify_owner("✅ Approvato! Ho pushato: %s. Deploy in corso." % ", ".join(fixes) if push_ok else "⚠️ Approvato ma push fallito: %s\n\nDettaglio: %s" % (", ".join(fixes), push_msg))
     return True, "approvato" if ok else "approvato (nulla da pushare)"
 
 def reject_pending(proposal_id):
@@ -255,8 +255,8 @@ def reject_pending(proposal_id):
 def _git_push(msg):
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_PAT")
     if not token:
-        log.info("maintenance: no GITHUB_TOKEN, skip push")
-        return False
+        log.warning("maintenance: no GITHUB_TOKEN, skip push")
+        return False, "no GITHUB_TOKEN"
     remote = None
     try:
         subprocess.run(["git", "config", "user.email", "bot@seriea-stats.local"], check=True, timeout=10)
@@ -264,26 +264,32 @@ def _git_push(msg):
         subprocess.run(["git", "add", "-A"], check=True, timeout=10)
         res = subprocess.run(["git", "diff", "--cached", "--quiet"])
         if res.returncode == 0:
-            log.info("maintenance: nulla da committare")
-            return False
+            log.warning("maintenance: nulla da committare dopo git add -A")
+            return False, "git diff vuoto"
         subprocess.run(["git", "commit", "-m", msg], check=True, timeout=10)
-        # push via GIT_ASKPASS: il token NON resta nel .git/config
         remote = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True, timeout=10).stdout.strip()
         if "github.com" in remote:
             askpass = pathlib.Path(__file__).resolve().parent.parent / "_git_askpass.sh"
-            askpass.write_text(f"#!/bin/sh\necho '{token}'", encoding="utf-8")
+            askpass.write_text("#!/bin/sh\necho '%s'" % token, encoding="utf-8")
             askpass.chmod(0o700)
             env = os.environ.copy()
             env["GIT_ASKPASS"] = str(askpass)
             try:
-                subprocess.run(["git", "push"], check=True, timeout=30, env=env)
+                result = subprocess.run(["git", "push"], capture_output=True, text=True, timeout=30, env=env)
+                if result.returncode != 0:
+                    err = result.stderr.strip()
+                    log.warning("maintenance: git push fallito (rc=%d): %s", result.returncode, err)
+                    return False, "push fallito: %s" % err[:200]
                 log.info("maintenance: autodeploy push ok: %s", msg)
-                return True
+                return True, "push ok"
             finally:
                 askpass.unlink(missing_ok=True)
+        else:
+            return False, "remote non è github.com: %s" % remote
     except Exception as e:
         log.warning("maintenance: push fallito: %s", e)
-    return False
+        return False, "eccezione: %s" % str(e)[:200]
+    return False, "sconosciuto"
 
 def _latest_webdev_ideas():
     """Cerca ultime novità webdev nei forum (Hacker News RSS) per ispirare chicche."""
