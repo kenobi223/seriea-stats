@@ -4,3 +4,4 @@ flask>=3.0
 pysocks>=1.7
 redis>=5.0
 python-dotenv>=1.0
+firecrawl-py>=1.0
