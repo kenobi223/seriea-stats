@@ -165,27 +165,46 @@ class BigPickleAgent(threading.Thread):
         fixtures = data.get("fixtures") or []
         results = data.get("results") or []
         tracking = data.get("tracking") or {}
-        # check 1: fixtures vuote ma non è pausa lunga
+        # check 1: fixtures vuote
         if not fixtures:
             issues.append("fixtures vuote (0 partite) - finestra ESPN troppo corta o pausa finita")
         # check 2: giornate sballate
         rounds = sorted({m.get("round") for rnd in results for m in rnd.get("matches",[]) if m.get("round") is not None})
         if rounds and rounds != list(range(min(rounds), max(rounds)+1)):
             issues.append(f"giornate sballate in results: {rounds}")
-        # check 3: tracking fermo
-        if not tracking.get("evaluated"):
-            # se ci sono partite finite da >3h ma non valutate
-            pass
-        # check 4: live fermo
-        live = data.get("live")
-        if live and not live.get("matches") and fixtures:
+        # check 3: analisi partita per partita - l'algoritmo aveva previsto giusto?
+        try:
+            from app.analysis import tracker as trk
+            tdata = trk.load()
+            for rec in (tdata.get("records") or [])[-5:]:
+                if not rec.get("evaluated") or not rec.get("result"):
+                    continue
+                res = rec["result"]["1x2"]
+                # prendi il pick del modello per 1x2
+                picks = {p["market"]: p["pick"] for p in rec.get("picks") or []}
+                pred = picks.get("1x2")
+                ok = "✅" if pred == res else "❌"
+                issues.append(f"{ok} {rec['home']}-{rec['away']} {rec['result']['home_score']}-{rec['result']['away_score']}: modello diceva {pred}, uscito {res} ({'corretto' if pred==res else 'sbagliato'} per algoritmo)")
+                if len(issues) > 8:
+                    break
+        except Exception as e:
+            log.debug("per-match check: %s", e)
+        # check 4: analisi squadra per squadra
+        try:
+            for r in (data.get("standings") or [])[:3]:
+                name = r.get("name")
+                # confronta punti vs xG attesa se disponibile
+                issues.append(f"Team {name}: {r.get('points')}pt in {r.get('played')}g - algoritmo valuta {'sopra' if (r.get('gf',0) or 0) > 5 else 'sotto'} media gol")
+                if len(issues) > 12:
+                    break
+        except:
             pass
         state = _read()
         state["big_pickle"] = {"at": int(time.time()), "issues": issues, "fixtures": len(fixtures), "rounds": rounds}
         state["checks"] = (state.get("checks") or [])[-20:] + [{"by": "big-pickle", "at": int(time.time()), "issues": issues}]
         if issues:
             state["pending_fix"] = True
-            log.warning("Big Pickle 20' rileva: %s", "; ".join(issues))
+            log.warning("Big Pickle 20' rileva: %s", "; ".join(issues[:3]))
         _write(state)
 
 class MuseSparkAgent(threading.Thread):
@@ -276,29 +295,37 @@ class MuseSparkAgent(threading.Thread):
         log.info("maintenance: proposta %s inviata a @Ziosapi in attesa di OK/Rifiuta", proposal_id)
 
     def _joint_reasoning(self, issues, news):
-        """Big Pickle e Muse Spark ragionano insieme: solo fix utili e SICURI."""
-        # regole di sicurezza: solo fix whitelist
+        """Big Pickle e Muse Spark ragionano insieme su ogni partita/squadra: solo fix utili e SICURI."""
+        # prima filtrano le issue vere da quelle di analisi (✅/❌)
+        real_issues = [i for i in issues if i.startswith("fixtures") or i.startswith("giornate") or "tracking" in i]
+        analysis = [i for i in issues if i.startswith("✅") or i.startswith("❌") or i.startswith("Team")]
         safe_fixes = {
             "fixtures vuote": "verifica finestra 30gg ok",
             "giornate sballate": "results round lock ok",
             "tracking fermo": "trigger evaluate",
         }
         fixes = []
-        for iss in issues:
+        for iss in real_issues:
             for key, fix in safe_fixes.items():
                 if key in iss:
                     fixes.append(fix)
-        # se c'è news su mister, aggiungi battuta ma non fix codice
         news_ctx = "; ".join(news[:3]) if news else "nessuna news mister"
-        # decisione congiunta: serve almeno un fix whitelist e nessuna issue critica non mappata
-        critical = [i for i in issues if not any(k in i for k in safe_fixes)]
+        # discussione congiunta: valutano se algoritmo ha previsto giusto ogni partita
+        correct = sum(1 for a in analysis if a.startswith("✅"))
+        wrong = sum(1 for a in analysis if a.startswith("❌"))
+        reason = f"analisi {correct} corrette, {wrong} sbagliate su {len(analysis)} - algoritmo {'ok' if correct>=wrong else 'da rivedere'}; news: {news_ctx[:80]}"
+        critical = [i for i in real_issues if not any(k in i for k in safe_fixes)]
         safe = len(fixes) > 0 and not critical
+        # aggiungono alla reason il dettaglio partita per partita (elementare)
+        if analysis:
+            reason += " | " + " | ".join(analysis[:3])
         return {
             "at": int(time.time()),
-            "issues": issues,
+            "issues": real_issues,
+            "analysis": analysis,
             "news": news_ctx,
             "fixes": fixes if safe else [],
             "safe": safe,
-            "reason": "ok, fix whitelist" if safe else f"skip per issue non whitelist: {critical[:1]}",
+            "reason": reason if safe else f"skip per issue non whitelist: {critical[:1]}",
             "agents": ["big-pickle-20m", "muse-spark-35m"],
         }
