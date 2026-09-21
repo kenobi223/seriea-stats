@@ -1,8 +1,13 @@
 """Manutenzione dual-AI: Big Pickle (20') e Muse Spark 1.3 (35').
 
+Due ingegneri informatici super organizzati, miglior titolo in web design &
+development, amano codificare pulito, modernizzare e aggiungere chicche:
+- a livello codice: migliorano i pronostici (Poisson, xG, calibrazione)
+- a livello design: modernizzano UI, aggiungono registrazione, PWA iPhone/Android
 Girano nel server (Render/Koyeb) senza PC acceso. Si parlano via
 data/maintenance.json: il 20' fa check rapido, il 35' fa deep fix
-e autodeploya con git push se ha GITHUB_TOKEN.
+e autodeploya con git push se approvato da @Ziosapi.
+Quando si svegliano sono super carichi e cercano nei forum le ultime novità webdev.
 """
 import json
 import logging
@@ -144,8 +149,22 @@ def _git_push(msg):
         log.warning("maintenance: push fallito: %s", e)
     return False
 
+def _latest_webdev_ideas():
+    """Cerca ultime novità webdev nei forum (Hacker News RSS) per ispirare chicche."""
+    try:
+        import xml.etree.ElementTree as ET
+        import requests
+        r = requests.get("https://news.ycombinator.com/rss", timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code == 200:
+            root = ET.fromstring(r.text)
+            titles = [it.findtext("title") for it in root.iter("item")][:3]
+            return [t for t in titles if t][:3]
+    except:
+        pass
+    return ["PWA installabile iPhone/Android", "WebAuthn registrazione senza password", "View Transitions API per animazioni fluide"]
+
 class BigPickleAgent(threading.Thread):
-    """Ogni 20' - check rapido (big-pickle free)."""
+    """Ogni 20' - ingegnere web design, check rapido + cerca idee forum."""
     def __init__(self, store):
         super().__init__(daemon=True, name="big-pickle-20m")
         self.store = store
@@ -167,19 +186,25 @@ class BigPickleAgent(threading.Thread):
                 log.exception("Big Pickle tick: %s", e)
 
     def tick(self):
+        # super carichi di idee: cercano ultime novità forum
+        ideas = _latest_webdev_ideas()
         issues = []
         data = self.store.data
         fixtures = data.get("fixtures") or []
         results = data.get("results") or []
         tracking = data.get("tracking") or {}
-        # check 1: fixtures vuote
         if not fixtures:
             issues.append("fixtures vuote (0 partite) - finestra ESPN troppo corta o pausa finita")
-        # check 2: giornate sballate
         rounds = sorted({m.get("round") for rnd in results for m in rnd.get("matches",[]) if m.get("round") is not None})
         if rounds and rounds != list(range(min(rounds), max(rounds)+1)):
             issues.append(f"giornate sballate in results: {rounds}")
-        # check 3: analisi partita per partita - l'algoritmo aveva previsto giusto?
+        # chicche ingegneri: propongono sempre una miglioria design/code
+        chicche = []
+        if not os.path.exists("app/web/static/manifest.json"):
+            chicche.append("💡 Idea ingegnere: aggiungere PWA manifest per installazione iPhone/Android")
+        if "Team" not in str(issues):
+            chicche.append(f"💡 Idea ingegnere: {ideas[0]}")
+        # analisi partita per partita
         try:
             from app.analysis import tracker as trk
             tdata = trk.load()
@@ -187,35 +212,34 @@ class BigPickleAgent(threading.Thread):
                 if not rec.get("evaluated") or not rec.get("result"):
                     continue
                 res = rec["result"]["1x2"]
-                # prendi il pick del modello per 1x2
                 picks = {p["market"]: p["pick"] for p in rec.get("picks") or []}
                 pred = picks.get("1x2")
                 ok = "✅" if pred == res else "❌"
-                issues.append(f"{ok} {rec['home']}-{rec['away']} {rec['result']['home_score']}-{rec['result']['away_score']}: modello diceva {pred}, uscito {res} ({'corretto' if pred==res else 'sbagliato'} per algoritmo)")
-                if len(issues) > 8:
+                issues.append(f"{ok} {rec['home']}-{rec['away']} {rec['result']['home_score']}-{rec['result']['away_score']}: modello diceva {pred}, uscito {res}")
+                if len(issues) > 10:
                     break
         except Exception as e:
             log.debug("per-match check: %s", e)
-        # check 4: analisi squadra per squadra
         try:
-            for r in (data.get("standings") or [])[:3]:
+            for r in (data.get("standings") or [])[:2]:
                 name = r.get("name")
-                # confronta punti vs xG attesa se disponibile
-                issues.append(f"Team {name}: {r.get('points')}pt in {r.get('played')}g - algoritmo valuta {'sopra' if (r.get('gf',0) or 0) > 5 else 'sotto'} media gol")
+                issues.append(f"Team {name}: {r.get('points')}pt - algoritmo valuta {'sopra' if (r.get('gf',0) or 0) > 5 else 'sotto'} media")
                 if len(issues) > 12:
                     break
         except:
             pass
+        # aggiungi chicche come issue di tipo idea (verranno valutate come sicure solo se whitelist)
+        issues.extend(chicche[:1])
         state = _read()
-        state["big_pickle"] = {"at": int(time.time()), "issues": issues, "fixtures": len(fixtures), "rounds": rounds}
-        state["checks"] = (state.get("checks") or [])[-20:] + [{"by": "big-pickle", "at": int(time.time()), "issues": issues}]
+        state["big_pickle"] = {"at": int(time.time()), "issues": issues, "fixtures": len(fixtures), "rounds": rounds, "ideas": ideas}
+        state["checks"] = (state.get("checks") or [])[-20:] + [{"by": "big-pickle", "at": int(time.time()), "issues": issues, "ideas": ideas}]
         if issues:
             state["pending_fix"] = True
-            log.warning("Big Pickle 20' rileva: %s", "; ".join(issues[:3]))
+            log.warning("Big Pickle ingegnere 20' rileva + idee %s: %s", ideas[0], "; ".join(issues[:2]))
         _write(state)
 
 class MuseSparkAgent(threading.Thread):
-    """Ogni 35' - deep fix (muse-spark 1.3 free)."""
+    """Ogni 35' - ingegnere senior, deep fix + modernizza design/code con chicche."""
     def __init__(self, store):
         super().__init__(daemon=True, name="muse-spark-35m")
         self.store = store
@@ -309,37 +333,49 @@ class MuseSparkAgent(threading.Thread):
         log.info("maintenance: proposta %s inviata a @Ziosapi in attesa di OK/Rifiuta", proposal_id)
 
     def _joint_reasoning(self, issues, news):
-        """Big Pickle e Muse Spark ragionano insieme su ogni partita/squadra: solo fix utili e SICURI."""
-        # prima filtrano le issue vere da quelle di analisi (✅/❌)
+        """Due ingegneri ragionano insieme: fix utili, sicuri + chicche modernizzazione."""
         real_issues = [i for i in issues if i.startswith("fixtures") or i.startswith("giornate") or "tracking" in i]
         analysis = [i for i in issues if i.startswith("✅") or i.startswith("❌") or i.startswith("Team")]
+        chicche = [i for i in issues if i.startswith("💡")]
+        # whitelist allargata ingegneri: includono migliorie PWA, design, codice pronostici
         safe_fixes = {
             "fixtures vuote": "verifica finestra 30gg ok",
             "giornate sballate": "results round lock ok",
             "tracking fermo": "trigger evaluate",
+            "PWA manifest": "aggiungi manifest.json + service worker iPhone/Android",
+            "registrazione": "aggiungi auth leggera sito",
+            "View Transitions": "aggiungi View Transitions API",
         }
         fixes = []
-        for iss in real_issues:
+        for iss in real_issues + chicche:
             for key, fix in safe_fixes.items():
-                if key in iss:
+                if key.lower() in iss.lower():
                     fixes.append(fix)
         news_ctx = "; ".join(news[:3]) if news else "nessuna news mister"
-        # discussione congiunta: valutano se algoritmo ha previsto giusto ogni partita
         correct = sum(1 for a in analysis if a.startswith("✅"))
         wrong = sum(1 for a in analysis if a.startswith("❌"))
-        reason = f"analisi {correct} corrette, {wrong} sbagliate su {len(analysis)} - algoritmo {'ok' if correct>=wrong else 'da rivedere'}; news: {news_ctx[:80]}"
-        critical = [i for i in real_issues if not any(k in i for k in safe_fixes)]
-        safe = len(fixes) > 0 and not critical
-        # aggiungono alla reason il dettaglio partita per partita (elementare)
+        # idee fresche dal forum
+        ideas = _latest_webdev_ideas()
+        reason = f"analisi {correct}/{len(analysis)} corrette - algoritmo {'ok' if correct>=wrong else 'da rivedere'}; news: {news_ctx[:60]}; idea top: {ideas[0]}"
+        if chicche:
+            reason += f" | chicca proposta: {chicche[0]}"
         if analysis:
-            reason += " | " + " | ".join(analysis[:3])
+            reason += " | " + " | ".join(analysis[:2])
+        critical = [i for i in real_issues if not any(k in i.lower() for k in [kk.lower() for kk in safe_fixes])]
+        # le chicche sono sempre sicure (solo aggiunte, non rotture)
+        safe = (len(fixes) > 0 and not critical) or (len(chicche) > 0)
+        if chicche and not fixes:
+            fixes = [safe_fixes[k] for k in safe_fixes if any(k.lower() in c.lower() for c in chicche)][:1]
+            safe = bool(fixes)
         return {
             "at": int(time.time()),
             "issues": real_issues,
             "analysis": analysis,
+            "chicche": chicche,
             "news": news_ctx,
             "fixes": fixes if safe else [],
             "safe": safe,
             "reason": reason if safe else f"skip per issue non whitelist: {critical[:1]}",
-            "agents": ["big-pickle-20m", "muse-spark-35m"],
+            "agents": ["big-pickle-ingegnere-20m", "muse-spark-ingegnere-35m"],
+            "ideas": ideas,
         }
