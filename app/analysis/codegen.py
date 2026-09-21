@@ -41,8 +41,7 @@ REGOLE:
 3. Rispondi ESCLUSIVAMENTE in questo formato JSON (senza markdown, senza ```):
 
 [
-  {"path": "app/web/static/style.css", "content": "...intero contenuto del file..."},
-  {"path": "app/web/static/app.js", "content": "...intero contenuto del file..."}
+  {"path": "app/web/static/style.css", "content": "...intero contenuto del file modificato..."}
 ]
 
 4. Ogni oggetto ha "path" (percorso relativo) e "content" (intero contenuto del file modificato)
@@ -50,7 +49,7 @@ REGOLE:
 6. NON cambiare la logica dei pronostici (predictor.py, tracker.py)
 7. NON togliere funzionalità esistenti
 8. Mantieni lo stile del codice esistente (Python Flask, vanilla JS, CSS)
-9. Massimo 3 file modificati per richiesta
+9. Massimo 1 file modificato per richiesta (scegli quello più rilevante)
 10. Il contenuto deve essere COMPLETO, non snippet parziali"""
 
 
@@ -66,6 +65,10 @@ def _read_files(paths):
         if fp.exists():
             try:
                 content = fp.read_text(encoding="utf-8", errors="replace")
+                # limita a 400 righe per file per non esaurire i token
+                lines = content.splitlines()
+                if len(lines) > 400:
+                    content = "\n".join(lines[:400]) + "\n... (troncato, %d righe totali)" % len(lines)
                 parts.append(f"=== {p} ===\n{content}\n=== FINE {p} ===")
             except Exception as e:
                 log.warning("lettura %s: %s", p, e)
@@ -137,7 +140,7 @@ def generate_fix(request, relevant_files=None):
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
             ],
-            "max_tokens": 8192,
+            "max_tokens": 16384,
             "temperature": 0.2,
         }
         for attempt in range(3):
@@ -168,7 +171,7 @@ def generate_fix(request, relevant_files=None):
         if changes:
             log.info("codegen: %s ha generato %d modifiche con %s", request, len(changes), model)
             return changes
-        log.warning("codegen %s: risposta non parsabile", model)
+        log.warning("codegen %s: risposta non parsabile, preview: %s", model, text[:300])
     log.warning("codegen: nessun modello ha prodotto modifiche valide")
     return []
 
