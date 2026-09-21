@@ -12,6 +12,7 @@ Quando si svegliano sono super carichi e cercano nei forum le ultime novità web
 import json
 import logging
 import os
+import pathlib
 import threading
 import time
 import subprocess
@@ -22,6 +23,68 @@ import config
 from app.core import kv
 
 log = logging.getLogger("maintenance")
+
+# ---- whitelist: fix descrittive → azioni file reali ----
+_STATIC = pathlib.Path(__file__).resolve().parent / "web" / "static"
+
+def _create_sw():
+    (_STATIC / "sw.js").write_text(
+        "self.addEventListener('install',e=>self.skipWaiting());\n"
+        "self.addEventListener('activate',e=>self.clients.claim());\n"
+        "self.addEventListener('fetch',e=>{\n"
+        "  if(e.request.method!=='GET')return;\n"
+        "  e.respondWith(caches.open('seriea-v1').then(c=>\n"
+        "    c.match(e.request).then(r=>r||fetch(e.request).then(res=>{\n"
+        "      if(res.ok)c.put(e.request,res.clone());return res;\n"
+        "    }).catch(()=>c.match(e.request)))));\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    return "sw.js creato"
+
+def _create_manifest():
+    manifest = {
+        "name": "SerieA Stats",
+        "short_name": "SerieA",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#1a1a2e",
+        "theme_color": "#e94560",
+        "icons": [
+            {"src": "/static/logo.svg", "sizes": "any", "type": "image/svg+xml"},
+            {"src": "/static/favicon.svg", "sizes": "any", "type": "image/svg+xml"},
+        ],
+    }
+    (_STATIC / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    return "manifest.json creato"
+
+_APPLY_MAP = {
+    "service worker": _create_sw,
+    "sw.js": _create_sw,
+    "manifest": _create_manifest,
+    "pwa manifest": _create_manifest,
+}
+
+def _apply_fixes(fixes):
+    """Mappa fix descrittive → file reali. Whitelist, niente eval/exec."""
+    applied = []
+    for fix in fixes:
+        key = fix.strip().lower()
+        handler = None
+        for pattern, fn in _APPLY_MAP.items():
+            if pattern in key:
+                handler = fn
+                break
+        if handler:
+            try:
+                result = handler()
+                log.info("fix applicata: %s → %s", fix, result)
+                applied.append({"fix": fix, "result": result})
+            except Exception as e:
+                log.error("fix fallita: %s → %s", fix, e)
+    return applied
 
 def _send_daily_summary():
     """A fine giornata (23:55) manda a @Ziosapi un txt con tutto ciò che si sono detti i due agenti."""
@@ -139,6 +202,8 @@ def approve_pending(proposal_id):
     if pending.get("status") != "pending":
         return False, "proposta già gestita"
     fixes = pending.get("fixes") or []
+    # crea i file reali PRIMA del push (altrimenti git diff è vuoto)
+    applied = _apply_fixes(fixes)
     ok = _git_push("chore: maintenance dual-AI approved by @Ziosapi - " + ", ".join(fixes))
     pending["status"] = "approved"
     pending["decided_at"] = int(time.time())
@@ -176,26 +241,30 @@ def _git_push(msg):
     if not token:
         log.info("maintenance: no GITHUB_TOKEN, skip push")
         return False
+    remote = None
     try:
         subprocess.run(["git", "config", "user.email", "bot@seriea-stats.local"], check=True, timeout=10)
         subprocess.run(["git", "config", "user.name", "seriea-maintenance-bot"], check=True, timeout=10)
         subprocess.run(["git", "add", "-A"], check=True, timeout=10)
-        # check if something to commit
         res = subprocess.run(["git", "diff", "--cached", "--quiet"])
         if res.returncode == 0:
             log.info("maintenance: nulla da committare")
             return False
         subprocess.run(["git", "commit", "-m", msg], check=True, timeout=10)
-        # set remote with token
+        # push via GIT_ASKPASS: il token NON resta nel .git/config
         remote = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True, timeout=10).stdout.strip()
-        if "github.com" in remote and token not in remote:
-            # usa token in URL
-            url = remote.replace("https://", f"https://{token}@")
-            subprocess.run(["git", "remote", "set-url", "origin", url], check=True, timeout=10)
-            subprocess.run(["git", "push"], check=True, timeout=30)
-            subprocess.run(["git", "remote", "set-url", "origin", remote], check=True, timeout=10)
-            log.info("maintenance: autodeploy push ok: %s", msg)
-            return True
+        if "github.com" in remote:
+            askpass = pathlib.Path(__file__).resolve().parent.parent / "_git_askpass.sh"
+            askpass.write_text(f"#!/bin/sh\necho '{token}'", encoding="utf-8")
+            askpass.chmod(0o700)
+            env = os.environ.copy()
+            env["GIT_ASKPASS"] = str(askpass)
+            try:
+                subprocess.run(["git", "push"], check=True, timeout=30, env=env)
+                log.info("maintenance: autodeploy push ok: %s", msg)
+                return True
+            finally:
+                askpass.unlink(missing_ok=True)
     except Exception as e:
         log.warning("maintenance: push fallito: %s", e)
     return False

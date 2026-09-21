@@ -1,24 +1,20 @@
 {
-  "name": "Serie A Stats",
+  "name": "SerieA Stats",
   "short_name": "SerieA",
-  "description": "Classifica, pronostici Poisson, quote e forma in tempo reale",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#070a14",
-  "theme_color": "#070a14",
-  "orientation": "any",
+  "background_color": "#1a1a2e",
+  "theme_color": "#e94560",
   "icons": [
     {
-      "src": "/logo.svg",
+      "src": "/static/logo.svg",
       "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any"
+      "type": "image/svg+xml"
     },
     {
-      "src": "/favicon.svg",
+      "src": "/static/favicon.svg",
       "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "maskable"
+      "type": "image/svg+xml"
     }
   ]
 }
