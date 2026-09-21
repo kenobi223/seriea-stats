@@ -941,6 +941,33 @@ class TelegramBot:
                 self._send(chat_id, tr._t("subs_coupon_ok"), _menu_kb(tr))
             else:
                 self._send(chat_id, tr._t("subs_coupon_bad"), _menu_kb(tr))
+        elif text.startswith("/opencode") or text.startswith("/fix") or text.startswith("/code"):
+            if chat_id not in config.TELEGRAM_OWNER_IDS:
+                self._send(chat_id, "🚫 Solo @Ziosapi può usare /opencode.")
+                return
+            req = text.split(None, 1)[1].strip() if len(text.split(None, 1)) > 1 else ""
+            if not req:
+                self._send(chat_id, "Usa: /opencode <descrizione fix>", _menu_kb(Tr(chat_id)))
+                return
+            from app import maintenance as maint
+            import hashlib
+            state = maint._read()
+            # crea proposta diretta dal capo (bypass joint reasoning)
+            proposal_id = hashlib.md5(req.encode()).hexdigest()[:8]
+            proposal = {
+                "id": proposal_id,
+                "at": int(time.time()),
+                "issues": [f"Richiesta diretta da @Ziosapi: {req}"],
+                "fixes": [req],
+                "news": "richiesta diretta capo",
+                "reason": f"capo ha chiesto: {req}",
+                "status": "pending",
+            }
+            state["pending_proposal"] = proposal
+            state["pending_fix"] = True
+            maint._write(state)
+            maint._notify_owner_proposal(proposal)
+            self._send(chat_id, f"🔧 Proposta creata ({proposal_id}): {req}\nTi mando i tasti OK/Rifiuta.", _menu_kb(Tr(chat_id)))
         else:
             self._send_menu(chat_id)
 
