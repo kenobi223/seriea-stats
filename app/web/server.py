@@ -319,11 +319,11 @@ def create_app(store: Store, tunnel=None):
     @app.get("/api/debug-codegen")
     def api_debug_codegen():
         """Test codegen: verifica API key e chiama LLM con fix semplice."""
-        from app.analysis.codegen import _api_key, ZEN_URL, MODELS, SYSTEM_PROMPT, _parse_response
+        from app.analysis.codegen import _api_key, GEMINI_URL, MODELS, SYSTEM_PROMPT, _parse_response
         import requests as req
         key = _api_key()
         if not key:
-            return jsonify({"error": "OPENCODE_API_KEY non impostata", "key_set": False})
+            return jsonify({"error": "GEMINI_API_KEY non impostata", "key_set": False})
         headers = {"Authorization": "Bearer %s" % key, "Content-Type": "application/json"}
         results = {}
         for model in MODELS:
@@ -337,7 +337,7 @@ def create_app(store: Store, tunnel=None):
                 "temperature": 0.2,
             }
             try:
-                r = req.post(ZEN_URL, json=payload, headers=headers, timeout=30)
+                r = req.post(GEMINI_URL, json=payload, headers=headers, timeout=30)
                 data = r.json()
                 text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
                 parsed = _parse_response(text) if text else []
@@ -346,6 +346,7 @@ def create_app(store: Store, tunnel=None):
                     "raw_len": len(text),
                     "raw_preview": text[:500] if text else "",
                     "parsed": len(parsed),
+                    "error_body": r.text[:500] if r.status_code != 200 else "",
                 }
             except Exception as e:
                 results[model] = {"error": str(e)[:200]}

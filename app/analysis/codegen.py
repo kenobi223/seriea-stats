@@ -14,13 +14,8 @@ import requests
 
 log = logging.getLogger("codegen")
 
-ZEN_URL = "https://opencode.ai/zen/v1/chat/completions"
-MODELS = [
-    "big-pickle",
-    "ling-3.0-flash-fin-free",
-    "mimo-v2.5-free",
-    "nemotron-3.5-lightning-free",
-]
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+MODELS = ["gemini-2.0-flash", "gemini-2.5-flash"]
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 STATIC = PROJECT_ROOT / "app" / "web" / "static"
@@ -60,16 +55,7 @@ REGOLE:
 
 
 def _api_key():
-    env_key = os.environ.get("OPENCODE_API_KEY")
-    if env_key:
-        return env_key
-    auth_json = os.path.expanduser("~/.local/share/opencode/auth.json")
-    try:
-        with open(auth_json, encoding="utf-8") as f:
-            data = json.load(f)
-        return (data.get("opencode") or {}).get("key")
-    except Exception:
-        return None
+    return os.environ.get("GEMINI_API_KEY")
 
 
 def _read_files(paths):
@@ -156,7 +142,7 @@ def generate_fix(request, relevant_files=None):
         }
         for attempt in range(2):
             try:
-                resp = requests.post(ZEN_URL, json=payload, headers=headers, timeout=60)
+                resp = requests.post(GEMINI_URL, json=payload, headers=headers, timeout=60)
                 if resp.status_code in (503, 504, 502):
                     time.sleep(2 * (attempt + 1))
                     continue
@@ -167,7 +153,7 @@ def generate_fix(request, relevant_files=None):
         else:
             continue
         if resp.status_code != 200:
-            log.warning("codegen %s HTTP %s", model, resp.status_code)
+            log.warning("codegen %s HTTP %s: %s", model, resp.status_code, resp.text[:200])
             continue
         data = resp.json()
         text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
