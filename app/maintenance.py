@@ -220,14 +220,10 @@ def approve_pending(proposal_id):
     fixes = pending.get("fixes") or []
     # crea i file reali PRIMA del push (altrimenti git diff è vuoto)
     applied, has_new = _apply_fixes(fixes)
-    ok = _git_push("chore: maintenance dual-AI approved by @Ziosapi - " + ", ".join(fixes)) if has_new else False
-    if not has_new and applied:
-        log.info("maintenance: fix già presenti, nulla di nuovo da pushare")
-        _notify_owner(f"✅ Fix applicate ma già presenti nel repo: {', '.join(fixes)}. Nessun push necessario.")
-        return True, "fix già applicate"
+    # push SEMPRE dopo _apply_fixes: il timestamp in sw.js garantisce un diff
+    ok = _git_push("chore: maintenance dual-AI approved by @Ziosapi - " + ", ".join(fixes))
     pending["status"] = "approved"
     pending["decided_at"] = int(time.time())
-    # sposta in history e pulisci pending per non riproporre subito
     history = state.get("approved_history") or []
     history.append(dict(pending))
     state["approved_history"] = history[-10:]
