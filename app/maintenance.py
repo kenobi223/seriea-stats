@@ -80,12 +80,13 @@ _APPLY_MAP = {
 }
 
 def _apply_fixes(fixes):
-    """Mappa fix descrittive → file reali. Whitelist, niente eval/exec.
-    Ritorna (applied, has_new) dove has_new indica se c'è qualcosa da commitare."""
+    """Fix descrittive → file reali. Prima whitelist, poi LLM per fix custom.
+    Ritorna (applied, has_new)."""
     applied = []
     has_new = False
     for fix in fixes:
         key = fix.strip().lower()
+        # 1. prova whitelist
         handler = None
         for pattern, fn in _APPLY_MAP.items():
             if pattern in key:
@@ -94,12 +95,34 @@ def _apply_fixes(fixes):
         if handler:
             try:
                 msg, changed = handler()
-                log.info("fix applicata: %s → %s", fix, msg)
+                log.info("fix whitelist: %s → %s", fix, msg)
                 applied.append({"fix": fix, "result": msg, "changed": changed})
                 if changed:
                     has_new = True
+                continue
             except Exception as e:
-                log.error("fix fallita: %s → %s", fix, e)
+                log.error("fix whitelist fallita: %s → %s", fix, e)
+        # 2. LLM reale: genera fix su misura
+        try:
+            from app.analysis.codegen import generate_fix
+            changes = generate_fix(fix)
+            if changes:
+                for ch in changes:
+                    fp = _STATIC.parent.parent / ch["path"]
+                    old = fp.read_text(encoding="utf-8") if fp.exists() else ""
+                    fp.parent.mkdir(parents=True, exist_ok=True)
+                    fp.write_text(ch["content"], encoding="utf-8")
+                    changed = old != ch["content"]
+                    log.info("fix LLM: %s → %s (changed=%s)", fix, ch["path"], changed)
+                    applied.append({"fix": fix, "result": ch["path"], "changed": changed})
+                    if changed:
+                        has_new = True
+            else:
+                log.warning("codegen: nessuna modifica generata per '%s'", fix)
+                applied.append({"fix": fix, "result": "LLM nessuna modifica", "changed": False})
+        except Exception as e:
+            log.error("codegen fallito per '%s': %s", fix, e)
+            applied.append({"fix": fix, "result": "errore LLM: %s" % str(e)[:100], "changed": False})
     return applied, has_new
 
 def _send_daily_summary():
