@@ -467,6 +467,23 @@ class TelegramBot:
     # ------------------------------------------------- callback data
     def _on_callback(self, chat_id, callback_id, message_id, data):
         self._answer_cb(callback_id)
+        # maint approval: solo capo può approvare
+        if data.startswith("maint_ok:") or data.startswith("maint_no:"):
+            if chat_id not in config.TELEGRAM_OWNER_IDS:
+                self._send(chat_id, "🚫 Solo @Ziosapi può approvare.")
+                return
+            pid = data.split(":",1)[1]
+            try:
+                from app import maintenance as maint
+                if data.startswith("maint_ok:"):
+                    ok, msg = maint.approve_pending(pid)
+                    self._edit_or_send(chat_id, message_id, f"✅ {msg} - proposta {pid}", _menu_kb(Tr(chat_id)))
+                else:
+                    ok, msg = maint.reject_pending(pid)
+                    self._edit_or_send(chat_id, message_id, f"❌ {msg} - proposta {pid} cancellata", _menu_kb(Tr(chat_id)))
+            except Exception as e:
+                self._send(chat_id, f"Errore: {e}")
+            return
         if not self._authorized(chat_id):
             return
         tr = Tr(chat_id)
@@ -996,6 +1013,27 @@ class TelegramBot:
         if not text:
             return
         log.info("Telegram: messaggio da %s: %r", chat_id, text[:120])
+        # comandi approvazione maintenance: ok / rifiuta (solo capo)
+        low = text.strip().lower()
+        if low in ("ok", "rifiuta", "rifiuto") and chat_id in config.TELEGRAM_OWNER_IDS:
+            try:
+                from app import maintenance as maint
+                state = maint._read()
+                pending = state.get("pending_proposal")
+                if not pending:
+                    self._send(chat_id, "Nessuna proposta in attesa.")
+                    return
+                pid = pending.get("id")
+                if low == "ok":
+                    ok, msg2 = maint.approve_pending(pid)
+                    self._send(chat_id, f"✅ {msg2} - {pid}", _menu_kb(Tr(chat_id)))
+                else:
+                    ok, msg2 = maint.reject_pending(pid)
+                    self._send(chat_id, f"❌ {msg2} - {pid} cancellata", _menu_kb(Tr(chat_id)))
+                return
+            except Exception as e:
+                self._send(chat_id, f"Errore: {e}")
+                return
         try:
             if text.startswith("/"):
                 self._handle_command(chat_id, text)

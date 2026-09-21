@@ -18,23 +18,48 @@ from app.core import kv
 
 log = logging.getLogger("maintenance")
 
+def _notify_owner_proposal(proposal):
+    """Manda proposta a @Ziosapi con tasti OK/Rifiuta."""
+    token = config.TELEGRAM_BOT_TOKEN
+    if not token:
+        return
+    targets = list(config.TELEGRAM_OWNER_IDS) if config.TELEGRAM_OWNER_IDS else ["@Ziosapi"]
+    # testo elementare
+    fixes = ", ".join(proposal.get("fixes") or [])
+    news = proposal.get("news") or "nessuna"
+    text = (
+        f"🔧 Proposta di fix dal team Big Pickle + Muse Spark:\n\n"
+        f"Problema: {', '.join(proposal.get('issues') or [])}\n"
+        f"Fix proposto: {fixes}\n"
+        f"News mister: {news[:120]}\n"
+        f"Motivo: {proposal.get('reason')}\n\n"
+        f"Scegli: OK per pushare e autodeployare, Rifiuta per cancellare."
+    )
+    kb = {
+        "inline_keyboard": [
+            [{"text": "✅ OK", "callback_data": f"maint_ok:{proposal['id']}"},
+             {"text": "❌ Rifiuta", "callback_data": f"maint_no:{proposal['id']}"}]
+        ]
+    }
+    for chat_id in targets:
+        try:
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            requests.post(url, json={"chat_id": chat_id, "text": text, "reply_markup": kb}, timeout=10)
+            log.info("maintenance: proposta %s a @Ziosapi %s", proposal["id"], chat_id)
+        except Exception as e:
+            log.warning("notify proposal %s: %s", proposal["id"], e)
+
 def _notify_owner(text):
     """Manda messaggio elementare a @Ziosapi (owner) via bot."""
     token = config.TELEGRAM_BOT_TOKEN
     if not token:
         return
-    # owner chat_id se configurato, altrimenti prova @Ziosapi
-    targets = list(config.TELEGRAM_OWNER_IDS) if config.TELEGRAM_OWNER_IDS else []
-    if not targets:
-        # fallback: prova username (funziona se è chat con bot)
-        targets = ["@Ziosapi"]
+    targets = list(config.TELEGRAM_OWNER_IDS) if config.TELEGRAM_OWNER_IDS else ["@Ziosapi"]
     for chat_id in targets:
         try:
             url = f"https://api.telegram.org/bot{token}/sendMessage"
-            # messaggio elementare
-            simple = f"🔧 Aggiornamento bot Serie A:\n\n{text}\n\nTutto ok, fatto da Big Pickle + Muse Spark."
+            simple = f"🔧 Aggiornamento bot Serie A:\n\n{text}\n\nFatto da Big Pickle + Muse Spark."
             requests.post(url, json={"chat_id": chat_id, "text": simple}, timeout=10)
-            log.info("maintenance: notificato @Ziosapi %s", chat_id)
         except Exception as e:
             log.warning("notify @Ziosapi %s: %s", chat_id, e)
 
@@ -49,6 +74,43 @@ def _write(state):
 def _read():
     data = kv.read_json(STATE_FILE)
     return data if isinstance(data, dict) else {"checks": [], "issues": []}
+
+def approve_pending(proposal_id):
+    state = _read()
+    pending = state.get("pending_proposal")
+    if not pending or pending.get("id") != proposal_id:
+        return False, "nessuna proposta in attesa con questo id"
+    if pending.get("status") != "pending":
+        return False, "proposta già gestita"
+    # esegue push
+    fixes = pending.get("fixes") or []
+    ok = _git_push("chore: maintenance dual-AI approved by @Ziosapi - " + ", ".join(fixes))
+    pending["status"] = "approved"
+    pending["decided_at"] = int(time.time())
+    state["pending_proposal"] = pending
+    state["pending_fix"] = False
+    # pulisci rejected se era stato rifiutato prima ma ora è migliore
+    _write(state)
+    _notify_owner(f"✅ Approvato! Ho pushato: {', '.join(fixes)}. Deploy in corso." if ok else f"✅ Approvato ma nulla da pushare: {', '.join(fixes)}")
+    return True, "approvato" if ok else "approvato (nulla da pushare)"
+
+def reject_pending(proposal_id):
+    state = _read()
+    pending = state.get("pending_proposal")
+    if not pending or pending.get("id") != proposal_id:
+        return False, "nessuna proposta in attesa"
+    pending["status"] = "rejected"
+    pending["decided_at"] = int(time.time())
+    # salva in rejected per deduplica
+    rejected = set(state.get("rejected_ids") or [])
+    rejected.add(pending["id"])
+    state["rejected_ids"] = list(rejected)[-20:]
+    state["last_rejected_fix"] = pending.get("fixes") or []
+    state["pending_proposal"] = None
+    state["pending_fix"] = False
+    _write(state)
+    _notify_owner(f"❌ Rifiutato: {', '.join(pending.get('fixes') or [])}. Non lo ripropongo a meno che non trovi di meglio.")
+    return True, "rifiutato"
 
 def _git_push(msg):
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_PAT")
@@ -168,14 +230,43 @@ class MuseSparkAgent(threading.Thread):
             _write(state)
             return
         fixed = joint.get("fixes") or []
+        # deduplica: se stessa proposta già pending o rifiutata, skip a meno che non sia migliore
+        pending = state.get("pending_proposal")
+        rejected = set(state.get("rejected_ids") or [])
+        proposal_id = str(hash(tuple(sorted(fixed))))[:8] if fixed else str(int(time.time()))
+        # se stessa proposta già rifiutata e non è migliore, non riproporre
+        if fixed and proposal_id in rejected:
+            # solo se fix è più efficace (più fix) riproponi
+            prev_fix_len = len((state.get("last_rejected_fix") or []))
+            if len(fixed) <= prev_fix_len:
+                log.info("maintenance: proposta %s già rifiutata, skip", proposal_id)
+                state["muse_spark"] = {"at": int(time.time()), "joint": joint, "fixed": [], "skipped": "già rifiutata"}
+                _write(state)
+                return
+        if pending and pending.get("status") == "pending":
+            log.info("maintenance: proposta %s già in attesa di OK, skip", pending.get("id"))
+            return
         state["muse_spark"] = {"at": int(time.time()), "joint": joint, "fixed": fixed}
         state["checks"].append({"by": "muse-spark", "at": int(time.time()), "joint": joint, "fixed": fixed})
-        state["pending_fix"] = False
+        if not fixed:
+            state["pending_fix"] = False
+            _write(state)
+            return
+        # crea proposta in attesa di OK
+        proposal = {
+            "id": proposal_id,
+            "at": int(time.time()),
+            "issues": joint.get("issues"),
+            "fixes": fixed,
+            "news": joint.get("news"),
+            "reason": joint.get("reason"),
+            "status": "pending"
+        }
+        state["pending_proposal"] = proposal
+        state["pending_fix"] = True
         _write(state)
-        if fixed:
-            # notifica elementare a @Ziosapi prima del push
-            _notify_owner("Ho sistemato: " + ", ".join(fixed) + ". News viste: " + joint.get("news","nessuna"))
-            _git_push("chore: maintenance dual-AI 20'/35' - joint safe fix: " + ", ".join(fixed))
+        _notify_owner_proposal(proposal)
+        log.info("maintenance: proposta %s inviata a @Ziosapi in attesa di OK/Rifiuta", proposal_id)
 
     def _joint_reasoning(self, issues, news):
         """Big Pickle e Muse Spark ragionano insieme: solo fix utili e SICURI."""
