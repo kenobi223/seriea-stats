@@ -234,6 +234,20 @@ def create_app(store: Store, tunnel=None):
             return redirect(link, code=302)
         return jsonify({"error": "Telegram bot non configurato (TELEGRAM_BOT_LINK)"}), 404
 
+    @app.get("/api/test-maintenance")
+    def api_test_maintenance():
+        """Forza Big Pickle + Muse Spark subito e manda proposta a @Ziosapi."""
+        if request.args.get("token") != os.environ.get("MAINTENANCE_TOKEN", "test123"):
+            return jsonify({"error": "token errato, usa ?token=test123 o imposta MAINTENANCE_TOKEN"}), 403
+        try:
+            from app.maintenance import BigPickleAgent, MuseSparkAgent
+            bp = BigPickleAgent(store); bp.tick()
+            ms = MuseSparkAgent(store); ms.tick()
+            from app.maintenance import _read
+            return jsonify({"ok": True, "maintenance": _read()})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     @app.get("/api/net-test")
     def api_net_test():
         """Test diretto (no Tor) dei host dati: utile per saggiare quale

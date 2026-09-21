@@ -152,6 +152,13 @@ class BigPickleAgent(threading.Thread):
 
     def run(self):
         log.info("Big Pickle 20' agent avviato")
+        # test immediato se richiesto
+        if os.environ.get("MAINTENANCE_TEST") == "1":
+            try:
+                log.info("Big Pickle TEST immediato")
+                self.tick()
+            except Exception as e:
+                log.exception("Big Pickle test tick: %s", e)
         while True:
             time.sleep(20*60)
             try:
@@ -215,6 +222,13 @@ class MuseSparkAgent(threading.Thread):
 
     def run(self):
         log.info("Muse Spark 1.3 35' agent avviato")
+        if os.environ.get("MAINTENANCE_TEST") == "1":
+            try:
+                log.info("Muse Spark TEST immediato (5s)")
+                time.sleep(5)
+                self.tick()
+            except Exception as e:
+                log.exception("Muse Spark test tick: %s", e)
         # offset di 5 min per non partire insieme al 20'
         time.sleep(5*60)
         while True:
