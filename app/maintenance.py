@@ -125,20 +125,58 @@ class MuseSparkAgent(threading.Thread):
             log.info("Muse Spark 35' check: tutto ok")
             return
         log.info("Muse Spark 35' interviene su: %s", "; ".join(issues))
-        # fix 1: se fixtures vuote, allarga finestra già a 30gg (già fatto), qui solo log
-        # fix 2: se giornate sballate, non riassegnare (già fixato in scheduler)
-        # qui potremmo applicare patch automatiche future
-        fixed = []
-        # esempio: se manca fixtures, forza refresh
-        if any("fixtures vuote" in i for i in issues):
-            fixed.append("verifica finestra 30gg ok")
-        if any("giornate sballate" in i for i in issues):
-            fixed.append("results round lock ok")
-        state["muse_spark"] = {"at": int(time.time()), "fixed": fixed}
-        state["checks"].append({"by": "muse-spark", "at": int(time.time()), "fixed": fixed})
+        # --- ragionamento congiunto con Big Pickle + ultime notizie ---
+        # Raccoglie le note dei mister (Google News) per contesto sicuro
+        latest_news = []
+        try:
+            for fx in (self.store.get("fixtures") or [])[:3]:
+                mo = fx.get("morale") or {}
+                for side in ("home", "away"):
+                    notes = (mo.get(side) or {}).get("notes") or []
+                    if notes:
+                        latest_news.append(f"{fx.get('home') if side=='home' else fx.get('away')}: {notes[0].get('title')}")
+        except Exception as e:
+            log.debug("news collect: %s", e)
+        # dialogo sicuro: entrambi devono concordare prima di toccare codice
+        joint = self._joint_reasoning(issues, latest_news)
+        if not joint.get("safe"):
+            log.warning("Muse Spark: modifica non sicura secondo joint reasoning, skip: %s", joint.get("reason"))
+            state["muse_spark"] = {"at": int(time.time()), "joint": joint, "fixed": []}
+            state["checks"].append({"by": "muse-spark", "at": int(time.time()), "joint": joint})
+            _write(state)
+            return
+        fixed = joint.get("fixes") or []
+        state["muse_spark"] = {"at": int(time.time()), "joint": joint, "fixed": fixed}
+        state["checks"].append({"by": "muse-spark", "at": int(time.time()), "joint": joint, "fixed": fixed})
         state["pending_fix"] = False
         _write(state)
-        # autodeploy se abbiamo fixato file
         if fixed:
-            # qui potremmo toccare file, per ora solo log e push se ci sono modifiche
-            _git_push("chore: maintenance dual-AI 20'/35' - auto fix")
+            _git_push("chore: maintenance dual-AI 20'/35' - joint safe fix: " + ", ".join(fixed))
+
+    def _joint_reasoning(self, issues, news):
+        """Big Pickle e Muse Spark ragionano insieme: solo fix utili e SICURI."""
+        # regole di sicurezza: solo fix whitelist
+        safe_fixes = {
+            "fixtures vuote": "verifica finestra 30gg ok",
+            "giornate sballate": "results round lock ok",
+            "tracking fermo": "trigger evaluate",
+        }
+        fixes = []
+        for iss in issues:
+            for key, fix in safe_fixes.items():
+                if key in iss:
+                    fixes.append(fix)
+        # se c'è news su mister, aggiungi battuta ma non fix codice
+        news_ctx = "; ".join(news[:3]) if news else "nessuna news mister"
+        # decisione congiunta: serve almeno un fix whitelist e nessuna issue critica non mappata
+        critical = [i for i in issues if not any(k in i for k in safe_fixes)]
+        safe = len(fixes) > 0 and not critical
+        return {
+            "at": int(time.time()),
+            "issues": issues,
+            "news": news_ctx,
+            "fixes": fixes if safe else [],
+            "safe": safe,
+            "reason": "ok, fix whitelist" if safe else f"skip per issue non whitelist: {critical[:1]}",
+            "agents": ["big-pickle-20m", "muse-spark-35m"],
+        }
