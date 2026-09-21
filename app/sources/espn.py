@@ -191,7 +191,7 @@ class EspnClient:
         return (comp.get("id"), self._team_name(hid), self._team_name(aid),
                 hid, aid, ts if ts is not None else _epoch(comp.get("date")), None)
 
-    def next_fixtures(self, season_id, days=14):
+    def next_fixtures(self, season_id, days=30):
         rows = []
         now = time.time()
         for comp in self._events(0, days):

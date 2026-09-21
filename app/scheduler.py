@@ -102,7 +102,7 @@ def run_cycle(store):
     # ---- riallinea calendario
     prev = {f["id"]: _restore_fixture(f) for f in store.get("fixtures", [])}
     now_fx = []
-    next_rows = client.next_fixtures(season_id, days=14)
+    next_rows = client.next_fixtures(season_id, days=30)
     for row in next_rows:
         event_id = row[0]
         fx = prev.get(event_id)
