@@ -8,7 +8,6 @@ logs/
 tor/__pycache__/
 
 # dev
-.git/
 .gitignore
 DEVELOPMENT.md
 *.log
