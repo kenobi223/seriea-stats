@@ -354,4 +354,20 @@ def create_app(store: Store, tunnel=None):
                 results[model] = {"error": str(e)[:200]}
         return jsonify({"key_set": True, "key_len": len(key), "results": results})
 
+    @app.get("/api/test-firecrawl")
+    def api_test_firecrawl():
+        from app.analysis.firecrawl_direttagoal import scrape_classifica, scrape_risultati
+        results = {}
+        try:
+            c = scrape_classifica()
+            results["classifica"] = {"ok": c is not None, "rows": len(c) if c else 0, "preview": str(c)[:300] if c else ""}
+        except Exception as e:
+            results["classifica"] = {"error": str(e)[:200]}
+        try:
+            r = scrape_risultati()
+            results["risultati"] = {"ok": bool(r), "count": len(r), "preview": str(r)[:300] if r else ""}
+        except Exception as e:
+            results["risultati"] = {"error": str(e)[:200]}
+        return jsonify(results)
+
     return app
