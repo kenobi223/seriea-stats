@@ -1,13 +1,8 @@
-"""Assistente AI reale via OpenCode Zen (modello big-pickle, gratuito).
+"""Assistente AI via Gemini API (gratis, 1M context).
 
-Usa la stessa API della sessione opencode (chiave salvata in
-~/.local/share/opencode/auth.json oppure env OPENCODE_API_KEY).
-Risponde SOLO sulla Serie A, attingendo ESCLUSIVAMENTE dai dati raccolti:
-
-  classifica, prossime partite, pronostici del modello, errori di quota.
-
-Se la chiave manca oppure la chiamata fallisce ritorna None e il chiamante
-ricade sull'assistente a parole chiave.
+Usa la chiave GEMINI_API_KEY per rispondere domande sulla Serie A,
+attingendo ESCLUSIVAMENTE dai dati raccolti:
+classifica, prossime partite, pronostici del modello, errori di quota.
 """
 import json
 import logging
@@ -21,38 +16,12 @@ import config
 
 log = logging.getLogger("llm")
 
-ZEN_URL = "https://opencode.ai/zen/v1/chat/completions"
-# Modello gratuito OpenCode Zen che risponde bene in questo momento.
-# big-pickle è spesso in quota esaurita ("FreeUsageLimitError") quando la
-# sessione opencode la sta già usando: si scala su un altro modello free.
-MODELS = [
-    "big-pickle",
-    "ling-3.0-flash-fin-free",
-    "mimo-v2.5-free",
-    "nemotron-3.5-lightning-free",
-]
-
-AUTH_JSON = os.path.expanduser("~/.local/share/opencode/auth.json")
-
-_key_cache = None
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+MODELS = ["gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-3.8-flash"]
 
 
 def _api_key():
-    """Chiave OpenCode Zen da env o da auth.json di opencode."""
-    global _key_cache
-    if _key_cache:
-        return _key_cache
-    env_key = os.environ.get("OPENCODE_API_KEY")
-    if env_key:
-        _key_cache = env_key
-        return _key_cache
-    try:
-        with open(AUTH_JSON, encoding="utf-8") as f:
-            data = json.load(f)
-        _key_cache = (data.get("opencode") or {}).get("key")
-    except Exception:
-        _key_cache = None
-    return _key_cache
+    return os.environ.get("GEMINI_API_KEY")
 
 
 def _build_context(standings, fixtures):
@@ -215,67 +184,56 @@ def _extract_answer(text):
 
 
 def ask_ai(question, fixtures, standings):
-    """Chiama il modello reale; ritorna la risposta nel formato della dashboard
+    """Chiama Gemini; ritorna la risposta nel formato della dashboard
     oppure None se non disponibile."""
     key = _api_key()
     if not key:
-        log.info("chiave OpenCode Zen assente: ricado sull'assistente base")
+        log.info("GEMINI_API_KEY assente: ricado sull'assistente base")
         return None
 
     context = _build_context(standings, fixtures)
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-    }
-    last_status = None
+    user_msg = f"DATI SERIE A DISPONIBILI:\n{context}\n\nDOMANDA DELL'UTENTE: {question}"
+
     for model in MODELS:
+        url = "%s/%s:generateContent?key=%s" % (GEMINI_BASE, model, key)
         payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": _SYSTEM},
-                {"role": "user",
-                 "content": f"DATI SERIE A DISPONIBILI:\n{context}\n\n"
-                            f"DOMANDA DELL'UTENTE: {question}"},
-            ],
-            "max_tokens": 900,
-            "temperature": 0.3,
+            "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
+            "systemInstruction": {"parts": [{"text": _SYSTEM}]},
+            "generationConfig": {"maxOutputTokens": 900, "temperature": 0.3},
         }
         for attempt in range(3):
             try:
-                resp = requests.post(ZEN_URL, json=payload, headers=headers,
-                                     timeout=45)
-                if resp.status_code not in (503, 504, 502):
-                    break
-                log.warning("OpenCode Zen %s HTTP %s (tentativo %d)",
-                            model, resp.status_code, attempt + 1)
-                time.sleep(1.5 * (attempt + 1))
+                resp = requests.post(url, json=payload, timeout=60)
+                if resp.status_code in (503, 504, 502, 429):
+                    log.warning("Gemini %s HTTP %s (tentativo %d)",
+                                model, resp.status_code, attempt + 1)
+                    time.sleep(3 * (attempt + 1))
+                    continue
+                break
             except Exception as e:
-                log.warning("chiamata OpenCode Zen %s fallita: %s", model, e)
-                if attempt >= 2:
-                    break
-                time.sleep(1.0)
+                log.warning("chiamata Gemini %s fallita: %s", model, e)
+                time.sleep(2)
         else:
             continue
         if resp.status_code != 200:
-            last_status = resp.status_code
-            if resp.status_code in (402, 429, 403):
-                log.warning("OpenCode Zen %s: %s", model, resp.status_code)
-                continue
-            log.warning("OpenCode Zen %s HTTP %s: %s", model, resp.status_code,
-                        resp.text[:160])
+            log.warning("Gemini %s HTTP %s: %s", model, resp.status_code, resp.text[:200])
             continue
         data = resp.json()
-        text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
+        text = ""
+        candidates = data.get("candidates") or []
+        if candidates and isinstance(candidates[0], dict):
+            parts = candidates[0].get("content", {}).get("parts", [])
+            text = parts[0].get("text", "") if parts else ""
         if not text:
             continue
         answer = _extract_answer(text)
         if answer is None:
-            log.warning("OpenCode Zen %s: risposta senza contenuto utile", model)
+            log.warning("Gemini %s: risposta senza contenuto utile", model)
             continue
         intro, lines = answer
-        log.info("risposta OpenCode Zen con modello %s", model)
+        log.info("risposta Gemini con modello %s", model)
         return {"intent": "llm", "intro": intro,
                 "lines": lines, "items": [],
                 "model": model}
-    log.warning("nessun modello OpenCode Zen disponibile (ultimo status %s)", last_status)
+    log.warning("nessun modello Gemini disponibile")
     return None
