@@ -369,6 +369,7 @@ def create_app(store: Store, tunnel=None):
     @app.get("/api/test-footballgpt")
     def api_test_footballgpt():
         from app.analysis.footballgpt import predict_match, _load_models
+        import pandas as pd
         loaded = _load_models()
         if not loaded:
             return jsonify({"error": "Modelli non caricati"})
@@ -378,7 +379,31 @@ def create_app(store: Store, tunnel=None):
         fx = fixtures[0]
         home = fx.get("home_team") or fx.get("home", "")
         away = fx.get("away_team") or fx.get("away", "")
-        result = predict_match(home, away, None)
-        return jsonify({"home": home, "away": away, "result": result})
+        results = store.get("results", [])
+        if not results:
+            return jsonify({"error": "Nessun risultato storico"})
+        rows = []
+        for r in results:
+            rows.append({
+                "HomeTeam": r.get("home", ""),
+                "AwayTeam": r.get("away", ""),
+                "FTHG": r.get("home_goals", r.get("hg", 0)),
+                "FTAG": r.get("away_goals", r.get("ag", 0)),
+                "FTR": r.get("result", r.get("ftr", "D")),
+                "HS": r.get("home_shots", r.get("hs", 0)),
+                "AS": r.get("away_shots", r.get("as_", 0)),
+                "HST": r.get("home_shots_on_target", r.get("hst", 0)),
+                "AST": r.get("away_shots_on_target", r.get("ast", 0)),
+                "HC": r.get("home_corners", r.get("hc", 0)),
+                "AC": r.get("away_corners", r.get("ac", 0)),
+                "HY": r.get("home_yellows", r.get("hy", 0)),
+                "AY": r.get("away_yellows", r.get("ay", 0)),
+                "HR": r.get("home_reds", r.get("hr", 0)),
+                "AR": r.get("away_reds", r.get("ar", 0)),
+                "Date": r.get("date", ""),
+            })
+        matches_df = pd.DataFrame(rows)
+        result = predict_match(home, away, matches_df)
+        return jsonify({"home": home, "away": away, "result": result, "matches_count": len(rows)})
 
     return app
