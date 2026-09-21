@@ -27,8 +27,18 @@ log = logging.getLogger("maintenance")
 # ---- whitelist: fix descrittive → azioni file reali ----
 _STATIC = pathlib.Path(__file__).resolve().parent / "web" / "static"
 
+def _write_if_changed(path, content):
+    """Scrivi solo se il contenuto è diverso da quello attuale."""
+    p = _STATIC / path
+    if p.exists() and p.read_text(encoding="utf-8") == content:
+        return False
+    p.write_text(content, encoding="utf-8")
+    return True
+
 def _create_sw():
-    (_STATIC / "sw.js").write_text(
+    import time as _t
+    sw = (
+        f"/* seriea-stats v2 {int(_t.time())} */\n"
         "self.addEventListener('install',e=>self.skipWaiting());\n"
         "self.addEventListener('activate',e=>self.clients.claim());\n"
         "self.addEventListener('fetch',e=>{\n"
@@ -37,10 +47,13 @@ def _create_sw():
         "    c.match(e.request).then(r=>r||fetch(e.request).then(res=>{\n"
         "      if(res.ok)c.put(e.request,res.clone());return res;\n"
         "    }).catch(()=>c.match(e.request)))));\n"
-        "});\n",
-        encoding="utf-8",
+        "});\n"
     )
-    return "sw.js creato"
+    p = _STATIC / "sw.js"
+    old = p.read_text(encoding="utf-8") if p.exists() else ""
+    p.write_text(sw, encoding="utf-8")
+    changed = old != sw
+    return ("sw.js creato" if changed else "sw.js già aggiornato", changed)
 
 def _create_manifest():
     manifest = {
@@ -55,10 +68,9 @@ def _create_manifest():
             {"src": "/static/favicon.svg", "sizes": "any", "type": "image/svg+xml"},
         ],
     }
-    (_STATIC / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    return "manifest.json creato"
+    content = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
+    changed = _write_if_changed("manifest.json", content)
+    return ("manifest.json creato" if changed else "manifest.json già aggiornato", changed)
 
 _APPLY_MAP = {
     "service worker": _create_sw,
@@ -68,8 +80,10 @@ _APPLY_MAP = {
 }
 
 def _apply_fixes(fixes):
-    """Mappa fix descrittive → file reali. Whitelist, niente eval/exec."""
+    """Mappa fix descrittive → file reali. Whitelist, niente eval/exec.
+    Ritorna (applied, has_new) dove has_new indica se c'è qualcosa da commitare."""
     applied = []
+    has_new = False
     for fix in fixes:
         key = fix.strip().lower()
         handler = None
@@ -79,12 +93,14 @@ def _apply_fixes(fixes):
                 break
         if handler:
             try:
-                result = handler()
-                log.info("fix applicata: %s → %s", fix, result)
-                applied.append({"fix": fix, "result": result})
+                msg, changed = handler()
+                log.info("fix applicata: %s → %s", fix, msg)
+                applied.append({"fix": fix, "result": msg, "changed": changed})
+                if changed:
+                    has_new = True
             except Exception as e:
                 log.error("fix fallita: %s → %s", fix, e)
-    return applied
+    return applied, has_new
 
 def _send_daily_summary():
     """A fine giornata (23:55) manda a @Ziosapi un txt con tutto ciò che si sono detti i due agenti."""
@@ -203,8 +219,12 @@ def approve_pending(proposal_id):
         return False, "proposta già gestita"
     fixes = pending.get("fixes") or []
     # crea i file reali PRIMA del push (altrimenti git diff è vuoto)
-    applied = _apply_fixes(fixes)
-    ok = _git_push("chore: maintenance dual-AI approved by @Ziosapi - " + ", ".join(fixes))
+    applied, has_new = _apply_fixes(fixes)
+    ok = _git_push("chore: maintenance dual-AI approved by @Ziosapi - " + ", ".join(fixes)) if has_new else False
+    if not has_new and applied:
+        log.info("maintenance: fix già presenti, nulla di nuovo da pushare")
+        _notify_owner(f"✅ Fix applicate ma già presenti nel repo: {', '.join(fixes)}. Nessun push necessario.")
+        return True, "fix già applicate"
     pending["status"] = "approved"
     pending["decided_at"] = int(time.time())
     # sposta in history e pulisci pending per non riproporre subito
