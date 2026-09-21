@@ -338,15 +338,26 @@ def create_app(store: Store, tunnel=None):
             }
             try:
                 r = req.post(GEMINI_URL, json=payload, headers=headers, timeout=30)
-                data = r.json()
-                text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+                raw = r.json()
+                # Gemini potrebbe usare un formato diverso
+                text = ""
+                choices = raw.get("choices") or []
+                if choices and isinstance(choices[0], dict):
+                    msg = choices[0].get("message") or {}
+                    text = msg.get("content", "")
+                elif "candidates" in raw:
+                    # formato Gemini nativo
+                    cands = raw["candidates"]
+                    if cands and isinstance(cands[0], dict):
+                        parts = cands[0].get("content", {}).get("parts", [])
+                        text = parts[0].get("text", "") if parts else ""
                 parsed = _parse_response(text) if text else []
                 results[model] = {
                     "status": r.status_code,
                     "raw_len": len(text),
                     "raw_preview": text[:500] if text else "",
                     "parsed": len(parsed),
-                    "error_body": r.text[:500] if r.status_code != 200 else "",
+                    "full_response": raw if r.status_code != 200 else "",
                 }
             except Exception as e:
                 results[model] = {"error": str(e)[:200]}

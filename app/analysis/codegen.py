@@ -156,7 +156,16 @@ def generate_fix(request, relevant_files=None):
             log.warning("codegen %s HTTP %s: %s", model, resp.status_code, resp.text[:200])
             continue
         data = resp.json()
-        text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        text = ""
+        choices = data.get("choices") or []
+        if choices and isinstance(choices[0], dict):
+            msg = choices[0].get("message") or {}
+            text = msg.get("content", "")
+        elif "candidates" in data:
+            cands = data["candidates"]
+            if cands and isinstance(cands[0], dict):
+                parts = cands[0].get("content", {}).get("parts", [])
+                text = parts[0].get("text", "") if parts else ""
         if not text:
             continue
         changes = _parse_response(text)
