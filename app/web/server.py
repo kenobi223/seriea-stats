@@ -1,9 +1,8 @@
 """Server web: dashboard + API JSON dello stato."""
 import logging
 import os
-import secrets
 
-from flask import Flask, jsonify, request, send_from_directory, session, redirect, url_for, render_template_string
+from flask import Flask, jsonify, request, send_from_directory
 
 import config
 from app.analysis.assistant import answer
@@ -15,137 +14,15 @@ log = logging.getLogger("web")
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
-LOGIN_HTML = """<!DOCTYPE html>
-<html lang="it"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Serie A - Login</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#0a0e1a;color:#eef2ff;font-family:Inter,system-ui,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}
-.card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:40px;width:100%;max-width:400px;margin:20px}
-h1{text-align:center;margin-bottom:8px;font-size:1.5rem}
-.sub{text-align:center;color:#94a3b8;margin-bottom:24px;font-size:.9rem}
-label{display:block;margin-bottom:6px;font-size:.85rem;color:#94a3b8}
-input{width:100%;padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);color:#eef2ff;font-size:.95rem;margin-bottom:16px}
-input:focus{outline:none;border-color:#34d399}
-button{width:100%;padding:12px;border:none;border-radius:8px;background:#34d399;color:#0a0e1a;font-weight:600;font-size:1rem;cursor:pointer}
-button:hover{opacity:.9}
-.error{background:rgba(248,113,113,.15);border:1px solid rgba(248,113,113,.3);color:#f87171;padding:10px;border-radius:8px;margin-bottom:16px;font-size:.85rem;text-align:center}
-.switch{text-align:center;margin-top:16px;font-size:.85rem;color:#94a3b8}
-.switch a{color:#34d399;text-decoration:none}
-</style>
-</head><body>
-<div class="card">
-<h1>Serie A Stats</h1>
-<p class="sub">Accedi al tuo account</p>
-{% if error %}<div class="error">{{ error }}</div>{% endif %}
-<form method="POST" action="/login">
-<label>Email</label>
-<input type="email" name="email" required placeholder="tu@email.com">
-<label>Password</label>
-<input type="password" name="password" required placeholder="Min 6 caratteri">
-<button type="submit">Accedi</button>
-</form>
-<div class="switch">Non hai un account? <a href="/register">Registrati</a></div>
-</div>
-</body></html>"""
-
-REGISTER_HTML = """<!DOCTYPE html>
-<html lang="it"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Serie A - Registrazione</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#0a0e1a;color:#eef2ff;font-family:Inter,system-ui,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}
-.card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:40px;width:100%;max-width:400px;margin:20px}
-h1{text-align:center;margin-bottom:8px;font-size:1.5rem}
-.sub{text-align:center;color:#94a3b8;margin-bottom:24px;font-size:.9rem}
-label{display:block;margin-bottom:6px;font-size:.85rem;color:#94a3b8}
-input{width:100%;padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);color:#eef2ff;font-size:.95rem;margin-bottom:16px}
-input:focus{outline:none;border-color:#34d399}
-button{width:100%;padding:12px;border:none;border-radius:8px;background:#60a5fa;color:#0a0e1a;font-weight:600;font-size:1rem;cursor:pointer}
-button:hover{opacity:.9}
-.error{background:rgba(248,113,113,.15);border:1px solid rgba(248,113,113,.3);color:#f87171;padding:10px;border-radius:8px;margin-bottom:16px;font-size:.85rem;text-align:center}
-.ok{background:rgba(52,211,153,.15);border:1px solid rgba(52,211,153,.3);color:#34d399;padding:10px;border-radius:8px;margin-bottom:16px;font-size:.85rem;text-align:center}
-.switch{text-align:center;margin-top:16px;font-size:.85rem;color:#94a3b8}
-.switch a{color:#60a5fa;text-decoration:none}
-</style>
-</head><body>
-<div class="card">
-<h1>Serie A Stats</h1>
-<p class="sub">Crea un nuovo account</p>
-{% if error %}<div class="error">{{ error }}</div>{% endif %}
-{% if ok %}<div class="ok">{{ ok }}</div>{% endif %}
-<form method="POST" action="/register">
-<label>Email</label>
-<input type="email" name="email" required placeholder="tu@email.com">
-<label>Nome visualizzato</label>
-<input type="text" name="display_name" placeholder="Opzionale">
-<label>Password</label>
-<input type="password" name="password" required placeholder="Min 6 caratteri">
-<button type="submit">Registrati</button>
-</form>
-<div class="switch">Hai già un account? <a href="/login">Accedi</a></div>
-</div>
-</body></html>"""
-
 
 def create_app(store: Store, tunnel=None):
     app = Flask(__name__, static_folder=None)
-    app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
-
-    def login_required(f):
-        from functools import wraps
-        @wraps(f)
-        def decorated(*args, **kwargs):
-            if "user" not in session:
-                return redirect(url_for("login_page"))
-            return f(*args, **kwargs)
-        return decorated
-
-    @app.get("/login")
-    def login_page():
-        return render_template_string(LOGIN_HTML, error=None)
-
-    @app.post("/login")
-    def login_post():
-        from app.auth import login
-        email = request.form.get("email", "").strip()
-        password = request.form.get("password", "")
-        user, msg = login(email, password)
-        if not user:
-            return render_template_string(LOGIN_HTML, error=msg)
-        session["user"] = user["email"]
-        session["display_name"] = user.get("display_name", "")
-        return redirect("/")
-
-    @app.get("/register")
-    def register_page():
-        return render_template_string(REGISTER_HTML, error=None, ok=None)
-
-    @app.post("/register")
-    def register_post():
-        from app.auth import register
-        email = request.form.get("email", "").strip()
-        password = request.form.get("password", "")
-        display_name = request.form.get("display_name", "").strip()
-        ok, msg = register(email, password, display_name)
-        if not ok:
-            return render_template_string(REGISTER_HTML, error=msg, ok=None)
-        return render_template_string(REGISTER_HTML, error=None, ok=msg + " Ora puoi accedere.")
-
-    @app.get("/logout")
-    def logout():
-        session.clear()
-        return redirect("/login")
 
     @app.get("/")
-    @login_required
     def index():
         return send_from_directory(STATIC_DIR, "index.html")
 
     @app.get("/<path:path>")
-    @login_required
     def assets(path):
         resp = send_from_directory(STATIC_DIR, path)
         resp.headers["Cache-Control"] = "no-cache"
