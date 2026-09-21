@@ -549,9 +549,25 @@ class MuseSparkAgent(threading.Thread):
         # dialogo sicuro: entrambi devono concordare prima di toccare codice
         joint = self._joint_reasoning(issues, latest_news)
         if not joint.get("safe"):
-            log.warning("Muse Spark: modifica non sicura secondo joint reasoning, skip: %s", joint.get("reason"))
-            state["muse_spark"] = {"at": int(time.time()), "joint": joint, "fixed": []}
-            state["checks"].append({"by": "muse-spark", "at": int(time.time()), "joint": joint})
+            log.warning("Muse Spark: modifica non sicura secondo joint reasoning: %s", joint.get("reason"))
+            # manda comunque una notifica all'owner spiegando perché non è sicuro
+            reason = joint.get("reason", "motivo sconosciuto")
+            fixes = joint.get("fixes") or []
+            analysis = joint.get("analysis") or []
+            msg = "⚠️ Muse Spark & BigPickle hanno valutato un fix ma non è sicuro:\n\n"
+            msg += f"Motivo: {reason}\n\n"
+            if fixes:
+                msg += "Fix proposti (NON applicati):\n"
+                for f in fixes[:5]:
+                    msg += f"  • {f}\n"
+            if analysis:
+                msg += "\nAnalisi predittiva:\n"
+                for a in analysis[:5]:
+                    msg += f"  {a}\n"
+            msg += "\nSe vuoi applicare comunque, usa /approve."
+            _notify_owner(msg)
+            state["muse_spark"] = {"at": int(time.time()), "joint": joint, "fixed": [], "unsafe_notified": True}
+            state["checks"].append({"by": "muse-spark", "at": int(time.time()), "joint": joint, "unsafe_notified": True})
             _write(state)
             return
         fixed = joint.get("fixes") or []
