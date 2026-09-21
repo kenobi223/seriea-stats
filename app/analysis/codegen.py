@@ -33,24 +33,21 @@ READABLE_FILES = [
     "config.py",
 ]
 
-SYSTEM_PROMPT = """Sei un ingegnere software senior. L'utente ti chiede di modificare il codice di un'app web (Serie A stats dashboard + Telegram bot).
+SYSTEM_PROMPT = """Sei un ingegnere software senior. Modifica il codice di un'app web Serie A.
 
 REGOLE:
-1. Leggi i file forniti nel contesto
-2. Genera le modifiche necessarie per soddisfare la richiesta
-3. Rispondi ESCLUSIVAMENTE in questo formato JSON (senza markdown, senza ```):
+1. Leggi il file fornito nel contesto
+2. Genera SOLO le modifiche necessarie
+3. Rispondi ESCLUSIVAMENTE in JSON (senza markdown, senza ```, senza commenti):
 
-[
-  {"path": "app/web/static/style.css", "content": "...intero contenuto del file modificato..."}
-]
+[{"path": "percorso/file", "content": "intero contenuto del file MODIFICATO"}]
 
-4. Ogni oggetto ha "path" (percorso relativo) e "content" (intero contenuto del file modificato)
-5. Se non serve modificare un file, non includerlo
-6. NON cambiare la logica dei pronostici (predictor.py, tracker.py)
-7. NON togliere funzionalità esistenti
-8. Mantieni lo stile del codice esistente (Python Flask, vanilla JS, CSS)
-9. Massimo 1 file modificato per richiesta (scegli quello più rilevante)
-10. Il contenuto deve essere COMPLETO, non snippet parziali"""
+4. Il content deve essere il FILE INTERO modificato, non snippet
+5. Massimo 1 file per richiesta
+6. NON cambiare logica pronostici (predictor/tracker)
+7. NON rimuovere funzionalità
+8. Mantieni lo stile esistente
+9. Se il file è lungo,专注 sulle modifiche richieste"""
 
 
 def _api_key():
@@ -115,7 +112,7 @@ def generate_fix(request, relevant_files=None):
     """
     key = _api_key()
     if not key:
-        log.warning("codegen: OPENCODE_API_KEY assente")
+        log.warning("codegen: GROQ_API_KEY assente")
         return []
 
     # seleziona file rilevanti
@@ -124,8 +121,10 @@ def generate_fix(request, relevant_files=None):
 
     context = _read_files(relevant_files)
     if not context:
-        log.warning("codegen: nessun file leggibile")
+        log.warning("codegen: nessun file leggibile da %s", relevant_files)
         return []
+
+    log.info("codegen: richiesta=%s, files=%s, context_len=%d", request, relevant_files, len(context))
 
     headers = {
         "Authorization": "Bearer %s" % key,
