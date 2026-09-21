@@ -319,19 +319,36 @@ def create_app(store: Store, tunnel=None):
     @app.get("/api/debug-codegen")
     def api_debug_codegen():
         """Test codegen: verifica API key e chiama LLM con fix semplice."""
-        from app.analysis.codegen import _api_key, generate_fix
+        from app.analysis.codegen import _api_key, ZEN_URL, MODELS, SYSTEM_PROMPT, _parse_response
+        import requests as req
         key = _api_key()
         if not key:
             return jsonify({"error": "OPENCODE_API_KEY non impostata", "key_set": False})
-        try:
-            changes = generate_fix("cambia il colore del body in rosso")
-            return jsonify({
-                "key_set": True,
-                "key_len": len(key),
-                "changes": [{"path": c["path"], "content_len": len(c["content"])} for c in changes],
-                "num_changes": len(changes),
-            })
-        except Exception as e:
-            return jsonify({"error": str(e)[:500], "key_set": True})
+        headers = {"Authorization": "Bearer %s" % key, "Content-Type": "application/json"}
+        results = {}
+        for model in MODELS:
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": "RICHIEDI: cambia il colore del body in rosso\n\nFILE ATTUALI:\n=== app/web/static/style.css ===\nbody { background: #1a1a2e; color: white; }\n=== FINE ==="},
+                ],
+                "max_tokens": 2000,
+                "temperature": 0.2,
+            }
+            try:
+                r = req.post(ZEN_URL, json=payload, headers=headers, timeout=30)
+                data = r.json()
+                text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+                parsed = _parse_response(text) if text else []
+                results[model] = {
+                    "status": r.status_code,
+                    "raw_len": len(text),
+                    "raw_preview": text[:500] if text else "",
+                    "parsed": len(parsed),
+                }
+            except Exception as e:
+                results[model] = {"error": str(e)[:200]}
+        return jsonify({"key_set": True, "key_len": len(key), "results": results})
 
     return app
