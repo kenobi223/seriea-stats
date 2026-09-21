@@ -170,14 +170,16 @@ class BigPickleAgent(threading.Thread):
         self.store = store
 
     def run(self):
-        log.info("Big Pickle 20' agent avviato - primo giro tra 30s, poi ogni 20'")
+        # frequenza rapida per test: 5' poi ogni 5', così 5-6 risvegli = 30min invece di 3h
+        interval = int(os.environ.get("BIG_PICKLE_INTERVAL", "5")) * 60
+        log.info(f"Big Pickle agent avviato - primo giro tra 30s, poi ogni {interval//60}'")
         try:
             time.sleep(30)
             self.tick()
         except Exception as e:
             log.exception("Big Pickle primo tick: %s", e)
         while True:
-            time.sleep(20*60)
+            time.sleep(interval)
             try:
                 self.tick()
             except Exception as e:
@@ -243,14 +245,15 @@ class MuseSparkAgent(threading.Thread):
         self.store = store
 
     def run(self):
-        log.info("Muse Spark 1.3 35' agent avviato - primo giro tra 90s, poi ogni 35'")
+        interval = int(os.environ.get("MUSE_INTERVAL", "8")) * 60
+        log.info(f"Muse Spark 1.3 agent avviato - primo giro tra 90s, poi ogni {interval//60}'")
         try:
             time.sleep(90)
             self.tick()
         except Exception as e:
             log.exception("Muse Spark primo tick: %s", e)
         while True:
-            time.sleep(35*60)
+            time.sleep(interval)
             try:
                 self.tick()
             except Exception as e:
