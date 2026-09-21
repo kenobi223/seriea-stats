@@ -151,7 +151,7 @@ def generate_fix(request, relevant_files=None):
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
             ],
-            "max_tokens": 4000,
+            "max_tokens": 50000,
             "temperature": 0.2,
         }
         for attempt in range(2):
