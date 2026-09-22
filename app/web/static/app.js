@@ -44,6 +44,7 @@ function resultCharMap(r) {
   return { H: "V", D: "N", A: "P" }[r];
 }
 
+// ------------------------------------------------------------- header
 function renderHeader() {
   const d = state.data;
   const upd = document.getElementById("last-updated");
@@ -53,6 +54,7 @@ function renderHeader() {
   else cycle.textContent = d.season ? `Stagione ${d.season.name}` : "";
 }
 
+// ------------------------------------------------------------- matches
 function oddsTable(fx) {
   const groups = {};
   for (const o of fx.odds || []) {
@@ -147,24 +149,729 @@ function predictionBlock(fx) {
       <div style="width:${px}%;background:#6e7681">${px.toFixed(0)}%</div>
       <div style="width:${p2}%;background:var(--alert)">${p2.toFixed(0)}%</div>
     </div>`;
+    html += `<div class="prob-line">
+      <span><b>1</b> ${esc(fx.home)} ${p1.toFixed(1)}%</span>
+      <span><b>X</b> ${px.toFixed(1)}%</span>
+      <span><b>2</b> ${esc(fx.away)} ${p2.toFixed(1)}%</span>
+    </div>`;
   }
-  return html;
+  if (lambdas.home_goals != null) {
+    html += `<div class="kv" style="margin-top:6px"><span class="muted">Gol attesi:</span>
+      <b>${esc(fx.home)} ${lambdas.home_goals} — ${lambdas.away_goals} ${esc(fx.away)}</b></div>`;
+  }
+  if (ou["over_2.5"] != null) {
+    html += `<div class="kv"><span class="muted">Over/Under 2.5:</span>
+      <b>over ${(ou["over_2.5"] * 100).toFixed(0)}% · under ${(ou["under_2.5"] * 100).toFixed(0)}%</b></div>`;
+  }
+  if (btts.si != null) {
+    html += `<div class="kv"><span class="muted">Gol da entrambe (BTTS):</span>
+      <b>sì ${(btts.si * 100).toFixed(0)}% · no ${(btts.no * 100).toFixed(0)}%</b></div>`;
+  }
+  html += `<div style="margin-top:10px"><button class="cta" style="padding:7px 12px; font-size:12px;" onclick="switchTab('ai'); setTimeout(()=>explainMatch('${esc(fx.home)} - ${esc(fx.away)}'),150)">🤖 Perché questo pronostico?</button></div>`;
+  const pickRows = Object.keys(picks);
+  if (pickRows.length) {
+    html += `<div style="margin-top:8px"><b>Pronostico del modello:</b></div>`;
+    for (const m of pickRows) {
+      const mp = picks[m];
+      if (!mp || !mp.key) continue;
+      const odds = mp.odds ? ` @ ${fmtOdds(mp.odds)}`
+        : (mp.fair ? ` @ ${fmtOdds(mp.fair)} (fair)` : "");
+      html += `<div class="kv"><span><span class="chip v">${esc(mp.key.toUpperCase())}</span>
+        ${esc(mp.conf || "")} · ${esc((mp.prob * 100).toFixed(0))}%${odds}</span>
+        <b>${esc(m)}</b></div>`;
+    }
+  }
+  if (es.length) {
+    html += `<div class="kv"><span class="muted">Risultato esatto più probabile:</span>
+      <b>${esc(es[0].score)} (${(es[0].prob * 100).toFixed(0)}%)</b></div>`;
+  }
+  const tm = p.tipster_mix;
+  if (tm) {
+    const rate = tm.rate != null ? ` · affid. ${(tm.rate * 100).toFixed(0)}%` : "";
+    html += `<div class="kv"><span class="muted">🔁 Voce esterna ${esc(tm.source || "?")}:</span>
+      <b>1X2 ${esc(tm.outcome || "?")} · gol ${esc(tm.goals || "?")} · ${esc(tm.score || "?")}${rate}</b></div>`;
+  }
+  if (bets.length) {
+    html += `<div style="margin-top:8px"><b>Best bets (prob + quota ok):</b></div>`;
+    for (const b of bets) {
+      html += `<div class="kv"><span><span class="chip v">${esc(b.pick)}</span>
+        @ ${fmtOdds(b.odds)} (prob ${(b.prob * 100).toFixed(0)}%)</span>
+        <b style="color:var(--accent)">edge +${(b.edge * 100).toFixed(0)}%</b></div>`;
+    }
+  }
+  if (p.motivation) {
+    html += `<div class="motivation">${esc(p.motivation)}</div>`;
+  }
+  return html || `<div class="muted">Nessun pronostico.</div>`;
 }
 
-function renderActive() {
-  if (!state.data) return;
-  renderHeader();
+function filteredFixtures(){
+  let fx = (state.data.fixtures || []);
+  if(state.filterRound) fx = fx.filter(f => String(f.round)===state.filterRound);
+  if(state.filterText){
+    const q = state.filterText.toLowerCase();
+    fx = fx.filter(f => (f.home+f.away+f.venue).toLowerCase().includes(q));
+  }
+  if(state.favOnly) fx = fx.filter(f => isFav(f.home)||isFav(f.away));
+  if(state.sortBy==="prob") fx = [...fx].sort((a,b)=> (b.predictions?.["1x2"]?.["1"]||0)-(a.predictions?.["1x2"]?.["1"]||0));
+  else if(state.sortBy==="round") fx = [...fx].sort((a,b)=> (a.round||99)-(b.round||99));
+  else fx = [...fx].sort((a,b)=> (a.start_ts||0)-(b.start_ts||0));
+  return fx;
+}
+function renderMatches() {
+  const el = document.getElementById("tab-matches");
+  const fixtures = filteredFixtures();
+  if (!fixtures.length) {
+    el.innerHTML = `<div class="card muted">Nessuna partita con questi filtri. <button class="ghost" onclick="document.getElementById('search').value=''; state.filterText=''; state.filterRound=''; renderMatches()">Azzera</button></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="section-title">Prossime giornate · ${fixtures.length} partite ${state.favOnly?'⭐ preferiti':''}</div>`;
+  for (const fx of fixtures) {
+    const favH = isFav(fx.home), favA = isFav(fx.away);
+    el.insertAdjacentHTML("beforeend", `
+      <div class="card" style="position:relative; overflow:hidden;">
+        <div class="match-head" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'" style="cursor:pointer;">
+          <div class="teams">${esc(fx.home)} <span class="muted">-</span> ${esc(fx.away)}
+            <button onclick="event.stopPropagation(); toggleFav('${esc(fx.home)}')" class="ghost" style="padding:2px 8px; font-size:12px; border-color:${favH?'var(--warn)':'var(--border)'}">${favH?'★':'☆'} ${esc(fx.home)}</button>
+            <button onclick="event.stopPropagation(); toggleFav('${esc(fx.away)}')" class="ghost" style="padding:2px 8px; font-size:12px; border-color:${favA?'var(--warn)':'var(--border)'}">${favA?'★':'☆'} ${esc(fx.away)}</button>
+          </div>
+          <div class="meta">${fmtTime(fx.start_ts)} · Giornata ${esc(fx.round || "?")}${fx.venue ? " · " + esc(fx.venue) : ""} <span style="margin-left:8px; cursor:pointer;" onclick="event.stopPropagation(); shareText('${esc(fx.home)} - ${esc(fx.away)}: pronostico dal modello Serie A Stats')">↗ Condividi</span></div>
+        </div>
+        <div class="match-body">
+          <div class="grid2" style="margin-top:12px">
+            <div class="subpanel"><h3>Pronostico modello</h3>${predictionBlock(fx)}</div>
+            <div>
+              <div class="subpanel"><h3>Quote confrontate</h3>${oddsTable(fx)}</div>
+            </div>
+          </div>
+          <div class="grid3" style="margin-top:12px">
+            <div class="subpanel"><h3>${esc(fx.home)}</h3>${formBlock(fx, "home")}</div>
+            <div class="subpanel"><h3>${esc(fx.away)}</h3>${formBlock(fx, "away")}</div>
+            <div class="subpanel"><h3>🎭 Morale & conferenze</h3>${moraleBlock(fx, "home")}${moraleBlock(fx, "away")}</div>
+          </div>
+        </div>
+      </div>`);
+  }
 }
 
-async function loadData() {
+// ------------------------------------------------------------- results & live
+function renderLiveBlock(live) {
+  const matches = (live && live.matches) || [];
+  if (!matches.length) {
+    return `<div class="card muted">Nessuna partita in corso ora. I risultati finiti li trovi qui sotto, per giornata.</div>`;
+  }
+  const cards = matches.map(m => `
+    <div class="live-card">
+      <div class="live-team">${esc(m.home)}</div>
+      <div class="live-score">${m.hs ?? "-"} - ${m.as ?? "-"}</div>
+      <div class="live-team">${esc(m.away)}</div>
+      <div class="live-min">${m.minute != null ? m.minute + "'" : esc(m.period)}</div>
+    </div>`).join("");
+  return `<div class="section-title">🔴 Live · ${matches.length} partite</div>
+    <div class="card"><div class="live-grid">${cards}</div>
+      <div class="muted" style="margin-top:8px">Aggiornato ${fmtTime(live.updated)}</div></div>`;
+}
+
+function renderResults() {
+  const el = document.getElementById("tab-results");
+  const results = (state.data.results || []).slice().reverse();
+  let html = renderLiveBlock(state.live);
+
+  if (!results.length) {
+    html += `<div class="card muted">Nessun risultato ancora disponibile.</div>`;
+    el.innerHTML = html;
+    return;
+  }
+  for (const rnd of results) {
+    const row = rnd.matches.map(m => {
+      const parts = String(m.score || "").split("-").map(s => parseInt(s.trim(), 10));
+      let post = "";
+      if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+        const h = postMorale(parts[0], parts[1], true);
+        const a = postMorale(parts[0], parts[1], false);
+        post = `<span class="post-chip">${esc(m.home)} ${h} · ${a} ${esc(m.away)}</span>`;
+      }
+      return `
+      <div>
+        <div class="result-row">
+          <span>${esc(m.home)}</span>
+          <span class="result-score">${esc(m.score)}</span>
+          <span>${esc(m.away)}</span>
+        </div>
+        ${post}
+      </div>`;
+    }).join("");
+    html += `<div class="card"><div class="section-title" style="margin-top:0">Giornata ${esc(rnd.round)}</div>${row}</div>`;
+  }
+  el.innerHTML = html;
+}
+
+async function refreshLive() {
+  const active = document.querySelector("#tabs button.active");
+  if (!active || active.dataset.tab !== "results") return;
   try {
-    const res = await fetch("/api/data");
-    state.data = await res.json();
-    renderActive();
-  } catch(e) {
-    console.error(e);
+    const r = await fetch("/api/live");
+    const live = await r.json();
+    state.live = live;
+    const el = document.getElementById("tab-results");
+    const results = (state.data.results || []).slice().reverse();
+    let html = renderLiveBlock(live);
+    if (!results.length) {
+      html += `<div class="card muted">Nessun risultato ancora disponibile.</div>`;
+    } else {
+      for (const rnd of results) {
+        const row = rnd.matches.map(m => `
+          <div class="result-row">
+            <span>${esc(m.home)}</span>
+            <span class="result-score">${esc(m.score)}</span>
+            <span>${esc(m.away)}</span>
+          </div>`).join("");
+        html += `<div class="card"><div class="section-title" style="margin-top:0">Giornata ${esc(rnd.round)}</div>${row}</div>`;
+      }
+    }
+    el.innerHTML = html;
+  } catch (e) { /* il prossimo giro */ }
+}
+
+// ------------------------------------------------------------- tracking
+const MARKET_LABEL = { "1x2": "Risultato 1X2", over_under: "Over/Under 2.5", btts: "Entrambe a segno" };
+const PICK_LABEL = { over_2_5: "over 2.5", under_2_5: "under 2.5", si: "sì", no: "no" };
+
+function pickLabel(market, pick) {
+  if (market === "1x2") {
+    return { "1": "vittoria casa", x: "pareggio", "2": "vittoria trasferta" }[pick] || pick;
+  }
+  return PICK_LABEL[pick] || pick;
+}
+
+function renderTracking() {
+  const el = document.getElementById("tab-tracking");
+  const t = state.data.tracking || {};
+  const cal = state.data.calibration || {};
+  const rate = t.bets_rate != null ? (t.bets_rate * 100).toFixed(0) + "%" : "—";
+  const brier = t.brier != null ? t.brier.toFixed(3) : "—";
+
+  let html = `<div class="section-title">Onestà del modello · quanto i pronostici diventano realtà</div>
+    <div class="grid3">
+      <div class="card"><div class="big-num">${t.evaluated || 0}</div>
+        <div class="muted">partite valutate a fine gara</div></div>
+      <div class="card hit-card" onclick="toggleHits(this)"><div class="big-num">${t.bets_hit || 0}/${t.bets_total || 0}</div>
+        <div class="muted">pronostici indovinati (${rate}) · clicca per i dettagli</div></div>
+      <div class="card"><div class="big-num">${brier}</div>
+        <div class="muted">Brier score · più basso = più onesto</div></div>
+    </div>
+    <div id="hit-detail"></div>`;
+
+  // conteggio per PARTITA (una partita può avere più best-bet/vincere in + mercati)
+  if (t.match_bets_total) {
+    const mRate = t.match_bets_rate != null ? (t.match_bets_rate * 100).toFixed(0) + "%" : "—";
+    const mCls = t.match_bets_rate >= 0.5 ? "v" : "warn";
+    html += `<div class="card" style="margin-top:10px"><div class="kv">
+        <span class="muted" style="min-width:150px">Partite con pronostico vinto</span>
+        <span class="chip ${mCls}">${t.match_bets_hit || 0}/${t.match_bets_total} (${mRate})</span></div>
+      <div class="muted" style="margin-top:6px">Conteggio per partita: azzeccata quando almeno un best-bet è stato centrato (il totale sopra è per singolo pronostico).</div></div>`;
+  }
+
+  const bins = t.calibration_bins || [];
+  // calibrazione: predetto vs reale a fasce
+  if (bins.some(b => b.count > 0)) {
+    html += `<div class="card"><div class="section-title" style="margin-top:0">Calibrazione: che probabilità do vs cosa succede davvero</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">`;
+    for (const b of bins) {
+      if (!b.count) continue;
+      const ok = b.pred != null && b.actual != null;
+      const pct = b.pred * 100;
+      const cls = !ok ? "" : b.actual >= b.pred - 0.06 ? "v" : "warn";
+      html += `<div class="calib-card">
+        <div style="display:flex;justify-content:space-between"><b>${(b.lo * 100).toFixed(0)}–${(b.hi * 100).toFixed(0)}%</b>
+          <span class="chip ${cls}">n=${b.count}</span></div>
+        <div class="prob-bar" style="margin-top:8px">
+          <div style="width:${(b.pred * 100) || 0}%;background:var(--accent)" title="predetto"></div>
+        </div>
+        <div class="prob-bar" style="margin-top:3px">
+          <div style="width:${(b.actual * 100) || 0}%;background:var(--alert)" title="reale"></div>
+        </div>
+        <div class="muted" style="margin-top:4px;font-size:11.5px">
+          per fascia ${b.pred != null ? (b.pred * 100).toFixed(0) + "%" : "—"} predetto ·
+          reale ${b.actual != null ? (b.actual * 100).toFixed(0) + "%" : "—"}
+        </div>
+      </div>`;
+    }
+    html += `</div><div class="muted" style="margin-top:8px">Barra <span style="color:var(--accent)">blu</span> = probabilità dichiarata,
+      barra <span style="color:var(--alert)">rossa</span> = centratura reale. Se la rossa è più corta della blu, ero troppo ottimista.</div></div>`;
+  }
+
+  // correttori appresi
+  const withCal = Object.keys(MARKET_LABEL).filter(m => cal[m] && Object.keys(cal[m]).length);
+  if (withCal.length) {
+    html += `<div class="card"><div class="section-title" style="margin-top:0">Cosa ho imparato (correttori attivi)</div>`;
+    for (const m of withCal) {
+      html += `<div class="kv"><span class="muted" style="min-width:150px">${MARKET_LABEL[m]}</span>`;
+      for (const [k, f] of Object.entries(cal[m])) {
+        const bad = f > 1 ? "v" : f < 1 ? "warn" : "gray";
+        html += `<span class="chip ${bad}" title="probabilità reale / probabilità stimata">${pickLabel(m, k)} ×${f}</span>`;
+      }
+      html += `</div>`;
+    }
+    html += `<div class="muted" style="margin-top:6px">Le probabilità dei prossimi pronostici vengono moltiplicate per questi fattori (poi rinormalizzate).</div></div>`;
+  }
+
+  // fuori campione: backtest walk-forward (solo round precedenti)
+  const oos = t.oos || {};
+  const oosPicks = (oos.check || {}).picks || {};
+  if (oos.brier_calibrated != null && oos.brier != null && oos.records >= 2) {
+    const imp = oos.improvement != null ? `${oos.improvement >= 0 ? "+" : ""}${oos.improvement.toFixed(3)}` : "—";
+    const arrow = oos.reliable ? "↘" : "↗";
+    html += `<div class="card"><div class="section-title" style="margin-top:0">Fuori campione · vale anche senza vedere il futuro</div>
+      <div class="grid3">
+        <div class="card"><div class="big-num">${oos.brier.toFixed(3)}</div>
+          <div class="muted">Brier as-pubblicato</div></div>
+        <div class="card"><div class="big-num">${oos.brier_calibrated.toFixed(3)}</div>
+          <div class="muted">Brier ri-calibrato OOS ${arrow}</div></div>
+        <div class="card"><div class="big-num">${imp}</div>
+          <div class="muted">miglioramento (negativo = più onesto)</div></div>
+      </div>`;
+    if (oos.rps != null) {
+      const rc = oos.rps_calibrated != null ? oos.rps_calibrated : oos.rps;
+      html += `<div class="kv" style="margin-top:6px"><span class="muted">RPS 1X2 (ordinale) OOS</span>
+        <span class="chip">${oos.rps.toFixed(3)} → ${rc.toFixed(3)}</span></div>`;
+    }
+    if (oos.ci95) {
+      const sig = oos.significant ? "✅ significativo" : "≈ non conclusivo";
+      html += `<div class="kv" style="margin-top:6px"><span class="muted">CI95 miglioramento (bootstrap)</span>
+        <span class="chip ${oos.significant ? "v" : "warn"}">${oos.ci95.lo >= 0 ? "+" : ""}${oos.ci95.lo.toFixed(3)}…${(oos.ci95.hi >= 0 ? "+" : "") + oos.ci95.hi.toFixed(3)} · p_better ${oos.ci95.p_better.toFixed(2)} · ${sig}</span></div>`;
+    }
+    if (oosPicks.total) {
+      html += `<div class="kv" style="margin-top:6px"><span class="muted">Pronostici del modello OOS</span>
+        <span class="chip ${oosPicks.rate >= 0.5 ? "v" : "warn"}">${oosPicks.hit}/${oosPicks.total} (${(oosPicks.rate * 100).toFixed(0)}%)</span></div>`;
+    }
+    html += `<div class="muted" style="margin-top:6px">La calibrazione in produzione usa solo i round già finiti: nessuna fuga di dati avanti.</div></div>`;
+  }
+
+  // errori clamorosi
+  const misses = t.notable_misses || [];
+  if (misses.length) {
+    html += `<div class="card"><div class="section-title" style="margin-top:0">Dove ho sbagliato di più</div>`;
+    for (const m of misses) {
+      html += `<div class="kv"><span><b>${esc(m.home)} - ${esc(m.away)}</b>
+        <span class="muted">(${esc(m.score)} · gj ${esc(m.round || "?")})</span></span>
+        <span><span class="chip warn">${pickLabel(m.market, m.pick)}</span>
+        lo davo al ${(m.prob * 100).toFixed(0)}% @ ${fmtOdds(m.odds)}</span></div>`;
+    }
+    html += `</div>`;
+  }
+
+  // cosa ho imparato
+  const lessons = t.conclusions || [];
+  if (lessons.length) {
+    html += `<div class="card"><div class="section-title" style="margin-top:0">Riepilogo</div><ul style="margin:0;padding-left:18px">`;
+    for (const c of lessons) html += `<li style="margin:3px 0">${esc(c)}</li>`;
+    html += `</ul></div>`;
+  }
+
+  if (!lessons.length && !bins.length) {
+    html = `<div class="section-title">Onestà del modello</div>
+      <div class="card muted">Ancora nessun pronostico valutato: quando le prossime partite finiranno,
+      confronto pronostico vs risultato reale qui, mostro il tasso di centratura e correggo il modello.</div>`;
+  }
+  el.innerHTML = html;
+}
+
+let hitsLoaded = false;
+async function toggleHits(card) {
+  card.classList.toggle("open");
+  const box = document.getElementById("hit-detail");
+  const wantOpen = card.classList.contains("open");
+  box.innerHTML = wantOpen ? `<div class="muted">Carico i pronostici indovinati…</div>` : "";
+  if (!wantOpen || hitsLoaded) return;
+  hitsLoaded = true;
+  try {
+    const r = await fetch("/api/tracking-records");
+    const data = await r.json();
+    const rows = [];
+    for (const rec of data.records || []) {
+      for (const h of rec.hits || []) {
+        if (!h.hit) continue;
+        rows.push({ ...h, home: rec.home, away: rec.away, score: rec.score, round: rec.round });
+      }
+    }
+    if (!rows.length) {
+      box.innerHTML = `<div class="card muted">Nessun pronostico indovinato.</div>`;
+      return;
+    }
+    box.innerHTML = `<div class="card"><div class="section-title" style="margin-top:0">✅ Pronostici indovinati (${rows.length})</div>` +
+      rows.map(h => `<div class="kv"><span><b>${esc(h.home)} - ${esc(h.away)}</b>
+        <span class="muted">(${esc(h.score)} · gj ${esc(h.round || "?")})</span></span>
+        <span><span class="chip v">${pickLabel(h.market, h.pick)}</span>
+        lo davo al ${((h.prob || 0) * 100).toFixed(0)}% @ ${fmtOdds(h.odds)}</span></div>`).join("") +
+      `</div>`;
+  } catch (e) {
+    box.innerHTML = `<div class="card muted">Errore nel caricamento dei dettagli.</div>`;
   }
 }
 
-loadData();
-setInterval(loadData, REFRESH_MS);
+// ------------------------------------------------------------- standings
+let standingsSort = { key: "position", dir: 1 };
+function renderStandings() {
+  const el = document.getElementById("tab-standings");
+  let rows = [...(state.data.standings || [])];
+  if (!rows.length) {
+    el.innerHTML = `<div class="muted">Nessun dato.</div>`;
+    return;
+  }
+  // filtro ricerca anche in classifica
+  if(state.filterText){
+    const q = state.filterText.toLowerCase();
+    rows = rows.filter(r => r.name.toLowerCase().includes(q));
+  }
+  // ordinamento cliccabile
+  rows.sort((a,b)=>{
+    const vA = a[standingsSort.key] ?? 0, vB = b[standingsSort.key] ?? 0;
+    if(typeof vA==="string") return standingsSort.dir * vA.localeCompare(vB);
+    return standingsSort.dir * (vA - vB);
+  });
+  const teams = new Map(rows.map(r => [r.team_id, r]));
+  const fixtures = state.data.fixtures || [];
+  const formByTeam = new Map();
+  for (const fx of fixtures) {
+    formByTeam.set(fx.home_id, fx.form_home);
+    formByTeam.set(fx.away_id, fx.form_away);
+  }
+  function th(label, key){
+    const arrow = standingsSort.key===key ? (standingsSort.dir===1?" ▲":" ▼") : "";
+    return `<th style="cursor:pointer; user-select:none;" onclick="standingsSort.key='${key}'; standingsSort.dir*=-1; renderStandings()">${label}${arrow}</th>`;
+  }
+  el.innerHTML = `<div class="card" style="overflow:auto;"><table>
+    <thead><tr>${th("#","position")}${th("Squadra","name")}${th("G","played")}${th("V","wins")}${th("N","draws")}${th("P","losses")}${th("GF","gf")}${th("GA","ga")}${th("Pt","points")}<th>Ultime 5</th><th>⭐</th></tr></thead><tbody>` +
+    rows.map(r => {
+      const f = formByTeam.get(r.team_id);
+      const last = f ? (f.last_results || []).slice(-5).map(e => chipFrom(resultCharMap(e.result) || "?")).join("") : "";
+      const fav = isFav(r.name);
+      return `<tr style="${fav?'background:rgba(251,191,36,.08);':''}"><td class="pos-chip">${r.position}</td><td><b>${esc(r.name)}</b> ${fav?'⭐':''}</td>
+        <td>${r.played}</td><td>${r.wins}</td><td>${r.draws}</td><td>${r.losses}</td>
+        <td>${r.gf}</td><td>${r.ga}</td><td><b>${r.points}</b></td>
+        <td><span class="chips">${last}</span></td><td><button class="ghost" style="padding:2px 8px;" onclick="toggleFav('${esc(r.name)}'); renderStandings()">${fav?'★':'☆'}</button></td></tr>`;
+    }).join("") +
+    `</tbody></table><div class="muted" style="margin-top:8px">Clicca sulle intestazioni per ordinare · ⭐ preferiti salvati localmente</div></div>`;
+}
+
+// ------------------------------------------------------------- sources
+function renderSources() {
+  const el = document.getElementById("tab-sources");
+  const s = state.data.sources || {};
+  const rows = [
+    ["Sofascore", "risultati, statistiche, quote 1X2", s.sofascore ? "attivo" : "inattivo", true],
+    ["ESPn", "stagione, classifica, risultati, live, quote 1X2", (s.espn && s.espn.status) ? "attivo" : "inattivo", true],
+    ["centroquote", "conferma calendario Serie A dall'Italia", s.centroquote ? "raggiungibile" : "non raggiungibile da questo IP (datacenter)", false],
+    ["sogosport", "quote bookmaker italiane (best-effort)", s.sogosport ? "raggiungibile" : "non raggiungibile da questo IP (datacenter)", false],
+  ];
+  el.innerHTML = `<div class="card"><table>
+    <thead><tr><th>Fonte</th><th>Cosa fornisce</th><th>Stato</th></tr></thead><tbody>` +
+    rows.map(r => `<tr><td><b>${esc(r[0])}</b></td><td>${esc(r[1])}</td>
+      <td style="color:${r[3] ? "var(--accent)" : "var(--muted)"}">${esc(r[2])}</td></tr>`).join("") +
+    `</tbody></table></div>`;
+}
+
+// ------------------------------------------------------------- AI chat
+let aiReady = false;
+
+const AI_SUGGESTIONS = [
+  "Ci sono errori di quota oggi?",
+  "Qual è il pronostico della giornata?",
+  "Analizza Juventus - Milan",
+];
+
+function renderAIInsights(){
+  const el = document.getElementById("tab-ai");
+  el.innerHTML = `<div class="card ai-card"><div class="section-title">AI Insights · Serie A only</div><p class="muted">Due modi: chiedi libero o spiega un pronostico specifico.</p><div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px;"><div id="ai-col"></div><div id="explain-col"></div></div></div>`;
+  initAIInto(document.getElementById("ai-col"));
+  renderExplainInto(document.getElementById("explain-col"));
+}
+function initAIInto(container){
+  if(!container) return;
+  if(!state.data){ container.innerHTML=`<div class="muted">Carico...</div>`; setTimeout(()=>renderAIInsights(),800); return; }
+  const fixtures = state.data.fixtures || [];
+  const suggestions = AI_SUGGESTIONS.concat(fixtures.slice(0,2).map(f=> `Analizza ${f.home} - ${f.away}`));
+  state.aiSuggestions = suggestions;
+  container.innerHTML = `
+    <div class="subpanel"><h3>Chiedi all'AI</h3>
+      <div class="ai-suggest">${suggestions.map((s,i)=> `<button class="chip ai-chip" onclick="askAIByIndex(${i})">${esc(s)}</button>`).join(" ")}</div>
+      <div id="ai-log" class="ai-log" style="max-height:300px;"></div>
+      <div style="display:flex; gap:6px; margin-top:8px;">
+        <input id="ai-input" placeholder="es. errori di quota?" style="flex:1;" onkeydown="if(event.key==='Enter')askAI(this.value)">
+        <button class="cta" onclick="askAI(document.getElementById('ai-input').value)">Chiedi</button>
+      </div>
+    </div>`;
+}
+function renderExplainInto(container){
+  if(!container) return;
+  const fixtures = (state.data?.fixtures||[]);
+  if(!fixtures.length){ container.innerHTML=`<div class="muted">Nessuna partita.</div>`; return; }
+  const opts = fixtures.map(f=> `<option value="${esc(f.home)} - ${esc(f.away)}">${esc(f.home)} - ${esc(f.away)}</option>`).join("");
+  container.innerHTML = `
+    <div class="subpanel"><h3>Perché questo pronostico?</h3>
+      <select id="explain-select" style="width:100%; margin:8px 0;">${opts}</select>
+      <button class="cta" style="width:100%;" onclick="explainSelected()">Spiega con AI bar</button>
+      <div id="explain-log" class="ai-log" style="max-height:300px; margin-top:8px;"></div>
+    </div>`;
+}
+function initAI() {
+  // legacy wrapper per compatibilità
+  renderAIInsights();
+}
+
+function askAIByIndex(i) {
+  askAI(state.aiSuggestions[i]);
+}
+
+function aiLine(cls, html) {
+  const log = document.getElementById("ai-log");
+  if (log) log.insertAdjacentHTML("beforeend", `<div class="ai-line ${cls}">${html}</div>`);
+}
+
+async function askAI(question) {
+  question = (question || "").trim();
+  if (!question) return;
+  const input = document.getElementById("ai-input");
+  if (input) input.value = "";
+  aiLine("user", esc(question));
+  aiLine("bot", `<div class="muted">Analizzo i dati…</div>`);
+  try {
+    const r = await fetch("/api/ask", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    });
+    const res = await r.json();
+    let html = `<b>${esc(res.intro || "")}</b>`;
+    for (const l of res.lines || []) html += `<div style="margin-top:4px">${esc(l)}</div>`;
+    for (const it of res.items || []) {
+      const tag = it.tag || "info";
+      const tagCls = tag === "alert" ? "alert" : tag === "warn" ? "warn" : tag === "value" ? "v" : "gray";
+      html += `<div class="ai-item"><span class="chip ${tagCls}">${esc(tag.toUpperCase())}</span>
+        <b>${esc(it.title)}</b><div class="muted">${esc(it.text)}</div></div>`;
+    }
+    const log = document.getElementById("ai-log");
+    const nodes = log ? log.querySelectorAll(".ai-line") : [];
+    if (nodes.length) nodes[nodes.length - 1].outerHTML = `<div class="ai-line bot">${html}</div>`;
+  } catch (e) {
+    aiLine("bot", `<span class="muted">Errore: impossibile interrogare il server.</span>`);
+  }
+}
+
+function pickRow(p) {
+  const st = p.result === "win" ? "✅" : p.result === "loss" ? "❌" : "⏳";
+  const pct = ((p.prob || 0) * 100).toFixed(0) + "%";
+  const score = p.score ? `  ${p.score}` : "";
+  const lbl = ({1: "1", x: "X", 2: "2", "over_2.5": "Over 2.5",
+                "under_2.5": "Under 2.5", si: "BTTS Sì", no: "BTTS No"})[p.pick] || p.pick;
+  return `<div class="card"><div class="kv"><span>${esc(p.home)} - ${esc(p.away)}${score}</span>
+      <span class="chip">${st}</span></div>
+      <div class="muted">${esc(lbl)} @ ${fmtOdds(p.odds)} · prob. ${pct}${p.edge != null ? " · edge " + (p.edge * 100).toFixed(0) + "%" : ""}</div></div>`;
+}
+
+function renderSchedina() {
+  const el = document.getElementById("tab-schedina");
+  const s = state.data.schedina || {};
+  if (!s.round || !s.picks || !s.picks.length) {
+    el.innerHTML = `<div class="section-title">🎫 Schedina della giornata</div>
+      <div class="card muted">Nessuna schedina disponibile: viene creata prima della prima partita della giornata con gli esiti più probabili del modello.</div>`;
+    return;
+  }
+  const won = s.picks.filter(p => p.result === "win").length;
+  const lost = s.picks.filter(p => p.result === "loss").length;
+  const rows = s.picks.map(pickRow).join("");
+  const hist = (s.history || []).slice().reverse().map(h =>
+    `<div class="card history-card" onclick="this.classList.toggle('open')">
+       <div class="kv"><span>Giornata ${h.round}</span>
+       <span class="muted">${h.wins} vinti · ${h.losses} persi · ▼</span></div>
+       <div class="history-picks">${(h.picks || []).map(pickRow).join("")}</div>
+     </div>`).join("");
+  el.innerHTML = `<div class="section-title">🎫 Schedina della giornata ${s.round || "?"}</div>
+    <div class="grid3">
+      <div class="card"><div class="big-num">${won}/${s.picks.length}</div>
+        <div class="muted">eventi vinti</div></div>
+      <div class="card"><div class="big-num">${lost}/${s.picks.length}</div>
+        <div class="muted">eventi persi</div></div>
+      <div class="card"><div class="big-num">${s.picks.length}</div>
+        <div class="muted">esiti totali</div></div>
+    </div>${rows}
+    ${hist ? `<div class="section-title" style="margin-top:20px">📚 Schedine passate</div>${hist}` : ""}`;
+}
+
+function renderAI() {
+  renderAIInsights();
+}
+
+// ------------------------------------------------------------- tunnel + telegram
+async function renderTelegramLink() {
+  const a = document.getElementById("tg-link");
+  if (!a) return;
+  try {
+    const r = await fetch("/api/tg-info");
+    const d = await r.json();
+    if (d.link) {
+      a.href = d.link;
+      a.style.display = "inline-flex";
+    } else {
+      // se non configurato, nascondi bottone
+      a.style.display = "none";
+    }
+  } catch { a.style.display = "none"; }
+}
+async function renderTunnel() {
+  const box = document.getElementById("tunnel-box");
+  if (!box) return;
+  try {
+    const r = await fetch("/api/tunnel");
+    const t = await r.json();
+    if (t.url) {
+      box.innerHTML = `Link pubblico (da fuori casa, anche Safari su dati mobili): 
+        <a href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.url)}</a>`;
+    } else if (t.running || (t.available && t.available !== false)) {
+      box.textContent = "Link pubblico: in preparazione…";
+    } else if (!t.available) {
+      box.textContent = "Link pubblico: non disponibile (cloudflared assente).";
+    }
+  } catch (e) {
+    box.textContent = "Link pubblico: —";
+  }
+}
+
+// ------------------------------------------------------------- tabs & poll
+function switchTab(name) {
+  tabs.forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  const all = document.querySelectorAll(".tab");
+  all.forEach(s => {
+    if (s.id === "tab-" + name) {
+      s.classList.add("active");
+      s.style.animation = "none";
+      s.offsetHeight; // reflow
+      s.style.animation = "";
+    } else {
+      s.classList.remove("active");
+    }
+  });
+  renderActive();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+tabs.forEach(b => b.addEventListener("click", () => switchTab(b.dataset.tab)));
+// controlli globali
+document.getElementById("search")?.addEventListener("input", e=>{ state.filterText=e.target.value; renderActive(); });
+document.getElementById("filter-round")?.addEventListener("change", e=>{ state.filterRound=e.target.value; renderActive(); });
+document.getElementById("fav-toggle")?.addEventListener("click", e=>{
+  state.favOnly=!state.favOnly;
+  e.target.style.background = state.favOnly ? "var(--warn)" : "";
+  e.target.style.color = state.favOnly ? "#070a14" : "";
+  renderActive();
+});
+document.getElementById("sort-toggle")?.addEventListener("click", ()=>{
+  state.sortBy = state.sortBy==="prob" ? "time" : state.sortBy==="time" ? "round" : "prob";
+  renderMatches();
+});
+function populateRoundFilter(){
+  const sel = document.getElementById("filter-round");
+  if(!sel || !state.data) return;
+  const rounds = [...new Set((state.data.fixtures||[]).map(f=>f.round).filter(Boolean))].sort((a,b)=>a-b);
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Tutte le giornate</option>' + rounds.map(r=>`<option value="${r}">Giornata ${r}</option>`).join("");
+  sel.value = cur;
+}
+
+function renderTeams(){
+  const el = document.getElementById("tab-teams");
+  let rows = [...(state.data?.standings||[])];
+  if(state.filterText){
+    const q = state.filterText.toLowerCase();
+    rows = rows.filter(r=> r.name.toLowerCase().includes(q));
+  }
+  if(!rows.length){ el.innerHTML=`<div class="card muted">Nessuna squadra.</div>`; return; }
+  const fixtures = state.data?.fixtures||[];
+  const formByTeam = new Map();
+  for(const fx of fixtures){ formByTeam.set(fx.home_id, fx.form_home); formByTeam.set(fx.away_id, fx.form_away); }
+  el.innerHTML = `<div class="section-title">Squadre Serie A · 20 club · solo Serie A</div><div style="display:grid; grid-template-columns: repeat(auto-fill,minmax(280px,1fr)); gap:14px;">` +
+    rows.map(r=>{
+      const f = formByTeam.get(r.team_id);
+      const last = f ? (f.last_results||[]).slice(-5).map(e=> chipFrom(resultCharMap(e.result)||"?")).join("") : "";
+      const fav = isFav(r.name);
+      return `<div class="card" style="margin:0; cursor:pointer;" onclick="state.filterText='${esc(r.name)}'; switchTab('matches')">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <b>${r.position}. ${esc(r.name)}</b>
+          <button class="ghost" style="padding:2px 8px;" onclick="event.stopPropagation(); toggleFav('${esc(r.name)}'); renderTeams()">${fav?'★':'☆'}</button>
+        </div>
+        <div class="kv"><span class="muted">Punti</span><b>${r.points} · ${r.played}G · ${r.wins}V ${r.draws}N ${r.losses}P</b></div>
+        <div class="kv"><span class="muted">Gol</span><b>${r.gf} fatti · ${r.ga} subiti</b></div>
+        <div class="kv"><span class="muted">Forma</span><span class="chips">${last||'<span class=muted>—</span>'}</span></div>
+        <div class="muted" style="margin-top:8px; font-size:11px;">Clicca per vedere partite →</div>
+      </div>`;
+    }).join("") + `</div>`;
+}
+function explainMatch(match){
+  const sel = document.getElementById("explain-select");
+  if(sel) sel.value = match;
+  explainSelected();
+}
+async function explainSelected(){
+  const sel = document.getElementById("explain-select");
+  const match = sel ? sel.value : "";
+  if(!match) return;
+  const log = document.getElementById("explain-log");
+  log.insertAdjacentHTML("beforeend", `<div class="ai-line user">${esc(match)}</div><div class="ai-line bot"><span class="muted">Analizzo il pronostico…</span></div>`);
+  log.scrollTop = log.scrollHeight;
+  try{
+    const q = `Spiega in italiano il motivo del pronostico per ${match}: probabilità, gol attesi, forma, morale e quote. Sii dettagliato ma sintetico.`;
+    const r = await fetch("/api/ask", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({question: q})});
+    const res = await r.json();
+    let html = `<b>${esc(res.intro||"Motivo del pronostico")}</b>`;
+    for(const l of res.lines||[]) html+=`<div style="margin-top:6px">${esc(l)}</div>`;
+    for(const it of res.items||[]){
+      const tagCls = it.tag==="alert"?"alert":it.tag==="warn"?"warn":it.tag==="value"?"v":"gray";
+      html+=`<div class="ai-item"><span class="chip ${tagCls}">${esc((it.tag||"info").toUpperCase())}</span> <b>${esc(it.title)}</b><div class="muted">${esc(it.text)}</div></div>`;
+    }
+    const nodes = log.querySelectorAll(".ai-line.bot");
+    if(nodes.length) nodes[nodes.length-1].innerHTML = html;
+    log.scrollTop = log.scrollHeight;
+  }catch(e){
+    const nodes = log.querySelectorAll(".ai-line.bot");
+    if(nodes.length) nodes[nodes.length-1].innerHTML = `<span class="muted">Errore AI.</span>`;
+  }
+}
+function renderActive() {
+  const active = document.querySelector("#tabs button.active");
+  const name = active ? active.dataset.tab : "matches";
+  if (name === "matches") renderMatches();
+  else if (name === "results") { renderResults(); refreshLive(); }
+  else if (name === "tracking") renderTracking();
+  else if (name === "schedina") renderSchedina();
+  else if (name === "ai") renderAIInsights();
+  else if (name === "teams") renderTeams();
+  else if (name === "standings") renderStandings();
+}
+
+function showSkeleton() {
+  const active = document.querySelector("#tabs button.active");
+  const name = active ? active.dataset.tab : "matches";
+  const el = document.getElementById("tab-" + name);
+  if (el && !state.data) {
+    el.innerHTML = `<div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card" style="height:120px"></div>`;
+  }
+}
+async function poll() {
+  try {
+    const r = await fetch("/api/state");
+    state.data = await r.json();
+    hitsLoaded = false;
+    renderHeader();
+    populateRoundFilter();
+    renderActive();
+  } catch (e) {
+    document.getElementById("cycle-status").textContent = "connessione al server interrotta";
+  }
+}
+showSkeleton();
+poll();
+setInterval(poll, REFRESH_MS);
+setInterval(refreshLive, LIVE_REFRESH_MS);
+renderTunnel();
+renderTelegramLink();
+setInterval(renderTunnel, 15000);
