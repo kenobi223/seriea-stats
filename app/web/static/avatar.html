@@ -46,6 +46,7 @@ a{color:#7ea4ff;margin-top:12px;font-size:13px}
 <button class="chip on" data-view="upper">🗣 Bustino</button>
 <button class="chip" data-view="mid">👥 Mezzo</button>
 <button class="chip" data-view="full">🧍 Intero</button>
+<button class="chip on" id="b-head">📷 Testa: foto</button>
 </div>
 <div class="btns" id="row-mood">
 <button class="chip on" data-mood="happy">😀 Felice</button>
@@ -73,6 +74,7 @@ a{color:#7ea4ff;margin-top:12px;font-size:13px}
 }}
 </script>
 <script type="module">
+import * as THREE from 'three';
 import { TalkingHead } from 'talkinghead';
 import { LipsyncIt } from '/lipsync-it.mjs';
 
@@ -117,6 +119,11 @@ try {
       loadingText.textContent = `Caricamento avatar… ${pct}% (${(e.loaded/1048576).toFixed(0)} MB)`;
     }
   });
+  try { await installPhotoHead(); } catch(err){
+    console.warn('testa-foto non montata: ' + err);
+    const bh = document.getElementById('b-head');
+    bh.classList.remove('on'); bh.textContent = '👤 Testa: 3D';
+  }
   ready = true;
   loadingEl.style.display = 'none';
   ['b-pred','b-table','b-stop'].forEach(id => document.getElementById(id).disabled = false);
@@ -139,10 +146,144 @@ function onSubtitle(s){
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+// ---- testa-foto: la TUA foto montata sul corpo 3D ----
+const HIDE_3D_HEAD = ['AvatarHead','AvatarEyelashes','AvatarLeftEyeball','AvatarRightEyeball','AvatarTeethLower','AvatarTeethUpper'];
+const HEAD_BIND_CENTER = { x: 0, y: 1.624, z: 0.03 };  // centro testa in bind pose (dal GLB)
+const HEAD_DIAM = 0.26;                                 // diametro cerchio foto (unità modello)
+const MOUTH_POS = { x: 0.5, y: 0.67 };                  // posizione bocca nella foto (0..1)
+const MOUTHS = {
+  'sil': { w:.26, h:.015 }, 'PP': { w:.28, h:.02 }, 'FF': { w:.24, h:.05, teeth:true },
+  'aa':  { w:.40, h:.26 }, 'E':  { w:.42, h:.15 }, 'I':  { w:.42, h:.11 },
+  'O':   { w:.24, h:.22 }, 'U':  { w:.16, h:.15 },
+  'kk':  { w:.30, h:.13 }, 'CH': { w:.28, h:.15 }, 'SS': { w:.34, h:.07, teeth:true },
+  'DD':  { w:.30, h:.09 }, 'nn': { w:.30, h:.11 }, 'RR': { w:.26, h:.13 }
+};
+let face = null;          // { sprite, canvas, ctx, texture, img }
+let hiddenMeshes = [];
+let photoMode = true;
+let timeline = [], speakT0 = 0, mouthRAF = 0, lastViseme = '';
+
+function drawFace(v){
+  if (!face) return;
+  const { ctx, img } = face;
+  ctx.clearRect(0, 0, 512, 512);
+  ctx.save();
+  ctx.beginPath(); ctx.arc(256, 256, 250, 0, Math.PI * 2); ctx.clip();
+  const s = Math.max(512 / img.width, 512 / img.height);
+  const w = img.width * s, h = img.height * s;
+  ctx.drawImage(img, (512 - w) / 2, (512 - h) / 2, w, h);
+  // bocca animata
+  const m = MOUTHS[v] || { w:.26, h:.015 };
+  const mx = MOUTH_POS.x * 512, my = MOUTH_POS.y * 512;
+  ctx.fillStyle = '#5e1b1b'; ctx.strokeStyle = 'rgba(50,8,8,.85)'; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.ellipse(mx, my, m.w * 256, Math.max(0.012, m.h) * 256, 0, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+  if (m.teeth){
+    ctx.fillStyle = 'rgba(242,240,232,.95)';
+    ctx.beginPath(); ctx.ellipse(mx, my - m.h * 256 * 0.35, m.w * 256 * 0.78, m.h * 256 * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+  // anello tematico
+  ctx.beginPath(); ctx.arc(256, 256, 248, 0, Math.PI * 2);
+  ctx.lineWidth = 8; ctx.strokeStyle = 'rgba(233,69,96,.9)'; ctx.stroke();
+  face.texture.needsUpdate = true;
+}
+
+async function installPhotoHead(){
+  const img = new Image();
+  img.src = '/myavatar.jpg';
+  await img.decode();
+  const bone = head.armature.getObjectByName('Head');
+  if (!bone) throw new Error('osso Head non trovato');
+  // nasconde la testa 3D
+  hiddenMeshes = [];
+  head.scene.traverse(o => {
+    if (HIDE_3D_HEAD.includes(o.name) && o.isMesh){ o.visible = false; hiddenMeshes.push(o); }
+  });
+  if (!hiddenMeshes.length) throw new Error('mesh testa 3D non trovate');
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+  const texture = new THREE.CanvasTexture(canvas);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }));
+  sprite.scale.set(HEAD_DIAM, HEAD_DIAM, 1);
+  sprite.renderOrder = 10;
+  sprite.frustumCulled = false;
+  // offset locale: centro testa (bind) espresso nel riferimento dell'osso Head
+  bone.updateWorldMatrix(true, false);
+  const inv = bone.matrixWorld.clone().invert();
+  sprite.position.set(HEAD_BIND_CENTER.x, HEAD_BIND_CENTER.y, HEAD_BIND_CENTER.z).applyMatrix4(inv);
+  bone.add(sprite);
+  face = { sprite, canvas, ctx, texture, img };
+  drawFace('sil');
+}
+
+function setHeadMode(photo){
+  photoMode = photo;
+  hiddenMeshes.forEach(m => { m.visible = !photo; });
+  if (face) face.sprite.visible = photo;
+  const b = document.getElementById('b-head');
+  b.classList.toggle('on', photo);
+  b.textContent = photo ? '📷 Testa: foto' : '👤 Testa: 3D';
+}
+
+function buildTimeline(d){
+  const ev = [];
+  let end = 0;
+  for (let i = 0; i < d.words.length; i++){
+    const word = d.words[i];
+    if (!word || !word.length) continue;
+    const time = d.wtimes[i];
+    let duration = d.wdurations[i];
+    let val = null;
+    try {
+      const wrd = head.lipsyncPreProcessText(word, 'it');
+      val = head.lipsyncWordsToVisemes(wrd, 'it');
+    } catch(e){ val = null; }
+    if (!val || !val.visemes || !val.visemes.length) continue;
+    const dTotal = val.times[val.visemes.length - 1] + val.durations[val.visemes.length - 1];
+    duration = Math.min(duration, val.visemes.length * 200);
+    if (dTotal <= 0) continue;
+    for (let j = 0; j < val.visemes.length; j++){
+      const t = time + (val.times[j] / dTotal) * duration;
+      const dd = (val.durations[j] / dTotal) * duration;
+      ev.push({ t, d: dd, v: val.visemes[j] });
+      end = Math.max(end, t + dd);
+    }
+  }
+  return { ev, end: end + 500 };
+}
+
+function mouthLoop(){
+  mouthRAF = requestAnimationFrame(mouthLoop);
+  if (!face || !photoMode){ return; }
+  const now = performance.now() - speakT0;
+  if (now > timeline.end){ stopMouth(); return; }
+  let v = 'sil';
+  for (const e of timeline.ev){
+    if (now >= e.t && now < e.t + e.d){ v = e.v; break; }
+  }
+  if (v !== lastViseme){ lastViseme = v; drawFace(v); }
+}
+
+function startMouth(){
+  stopMouth();
+  lastViseme = '';
+  mouthRAF = requestAnimationFrame(mouthLoop);
+}
+
+function stopMouth(){
+  if (mouthRAF){ cancelAnimationFrame(mouthRAF); mouthRAF = 0; }
+  if (face && lastViseme !== 'sil'){ lastViseme = 'sil'; drawFace('sil'); }
+}
+
+
 // ---- TTS + lipsync ----
 async function speak(text, mood){
   if (!ready){ status('Avatar non ancora pronto…'); return; }
   try { head.stopSpeaking(); } catch(e){}
+  stopMouth();
   logEl.innerHTML = ''; curWord = null;
   status('Sintesi vocale in corso…');
   let d;
@@ -166,11 +307,14 @@ async function speak(text, mood){
     if (head.audioCtx && head.audioCtx.state === 'suspended') await head.audioCtx.resume();
     const audio = await head.audioCtx.decodeAudioData(u8.buffer);
     head.setMood(mood || 'happy');
+    timeline = buildTimeline(d);
+    speakT0 = performance.now() + 40;
     head.speakAudio(
       { audio, words: d.words, wtimes: d.wtimes, wdurations: d.wdurations },
       { lipsyncLang: 'it' },
       onSubtitle
     );
+    startMouth();
     status(`Lingua: it · ${d.words.length} parole · ${d.ms}ms`);
   } catch(err){
     status('');
@@ -238,7 +382,13 @@ document.getElementById('b-table').onclick = async (e) => {
 
 document.getElementById('b-stop').onclick = () => {
   try { head.stopSpeaking(); } catch(e){}
+  stopMouth();
   status('Interrotto');
+};
+
+document.getElementById('b-head').onclick = () => {
+  if (!face){ status('Testa-foto non disponibile (myavatar.jpg)'); return; }
+  setHeadMode(!photoMode);
 };
 </script>
 </body>
