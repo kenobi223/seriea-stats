@@ -201,6 +201,60 @@ def create_app(store: Store, tunnel=None):
             result = answer(question, fixtures)
         return jsonify(result)
 
+    @app.post("/api/tts")
+    def api_tts():
+        """TTS italiana gratuita (edge-tts): audio + tempi parole per lip-sync."""
+        import asyncio
+        import base64
+        import time
+
+        import edge_tts
+
+        payload = request.get_json(silent=True) or {}
+        text = (payload.get("text") or "").strip()[:1200]
+        if not text:
+            return jsonify({"ok": False, "err": "testo vuoto"}), 400
+        voice = payload.get("voice")
+        if voice not in ("it-IT-DiegoNeural", "it-IT-ElsaNeural"):
+            voice = "it-IT-DiegoNeural"
+
+        t0 = time.time()
+
+        async def _synth():
+            comm = edge_tts.Communicate(
+                text, voice=voice, rate="+5%", boundary="WordBoundary"
+            )
+            audio = bytearray()
+            words, wtimes, wdurations = [], [], []
+            async for chunk in comm.stream():
+                if chunk["type"] == "audio":
+                    audio.extend(chunk["data"])
+                elif chunk["type"] == "WordBoundary":
+                    word = (chunk.get("text") or "").strip()
+                    if not word:
+                        continue
+                    words.append(word)
+                    wtimes.append(int(chunk["offset"] / 10000))
+                    wdurations.append(max(40, int(chunk["duration"] / 10000)))
+            return bytes(audio), words, wtimes, wdurations
+
+        try:
+            audio, words, wtimes, wdurations = asyncio.run(_synth())
+        except Exception as exc:  # noqa: BLE001
+            log.warning("tts fallito: %s", exc)
+            return jsonify({"ok": False, "err": str(exc)[:200]}), 502
+        if not audio or not words:
+            return jsonify({"ok": False, "err": "audio vuoto"}), 502
+        return jsonify({
+            "ok": True,
+            "audio": base64.b64encode(audio).decode(),
+            "mime": "audio/mpeg",
+            "words": words,
+            "wtimes": wtimes,
+            "wdurations": wdurations,
+            "ms": int((time.time() - t0) * 1000),
+        })
+
     @app.get("/api/tunnel")
     def api_tunnel():
         if tunnel is None:

@@ -9,243 +9,237 @@
 body{margin:0;font-family:Inter,system-ui,sans-serif;background:#070a14;color:#eee;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:20px}
 h1{font-size:20px;margin:8px 0 2px}
 .sub{color:#888;font-size:13px;margin-bottom:12px}
-#stage{width:min(360px,85vw);aspect-ratio:1;background:radial-gradient(circle at 50% 35%,#1c2547,#0a0e1f);border-radius:24px;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 40px rgba(0,0,0,.5);overflow:hidden;position:relative}
-#sprite{background-repeat:no-repeat;transition:opacity .12s}
-#fallback{display:none;width:80%;height:80%;object-fit:cover;border-radius:50%}
-#mouthFx{display:none;position:absolute;left:43%;top:40%;width:14%;height:6px;background:#5a1f1f;border-radius:50%;box-shadow:inset 0 -2px 4px rgba(0,0,0,.5)}
+#stage{width:min(520px,92vw);height:min(60vh,560px);background:radial-gradient(circle at 50% 35%,#1c2547,#0a0e1f);border-radius:24px;box-shadow:0 8px 40px rgba(0,0,0,.5);overflow:hidden;position:relative}
+#avatar{width:100%;height:100%}
+#loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:#8ea0cf;font-size:14px;text-align:center;padding:20px}
+.spin{width:26px;height:26px;border:3px solid #2a3560;border-top-color:#e94560;border-radius:50%;animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
 .btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:12px}
 button{background:#e94560;border:0;color:#fff;font-weight:700;padding:9px 15px;border-radius:999px;cursor:pointer;font-size:13px}
 button.ghost{background:#222b45}
 button.chip{background:#1b2440;font-weight:600;font-size:12px;padding:6px 12px}
 button.chip.on{background:#e94560}
-button:disabled{opacity:.5}
-#scene{margin-top:8px;width:min(560px,100%);display:none;background:#10162b;border-radius:14px;padding:12px}
-#scene.open{display:block}
-.sgroup{margin-bottom:8px}
-.sgroup .lab{font-size:11px;color:#7d8bb0;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
-.srow{display:flex;gap:6px;flex-wrap:wrap}
-#log{margin-top:14px;max-width:560px;width:100%;background:#10162b;border-radius:12px;padding:12px;font-size:14px;line-height:1.8;min-height:70px;white-space:pre-wrap}
-#log .spoken{color:#e94560;font-weight:700}
+button:disabled{opacity:.5;cursor:default}
+#status{margin-top:12px;color:#7d8bb0;font-size:12px;min-height:16px}
+#log{margin-top:6px;max-width:560px;width:100%;background:#10162b;border-radius:12px;padding:12px;font-size:14px;line-height:1.8;min-height:70px;max-height:180px;overflow-y:auto}
+#log .word{transition:color .15s}
+#log .word.cur{color:#e94560;font-weight:700}
+#log .word.past{color:#5b6890}
 a{color:#7ea4ff;margin-top:12px;font-size:13px}
+.credit{margin-top:6px;color:#4a5578;font-size:11px;text-align:center}
 </style>
 </head>
 <body>
 <h1>🎙️ Barista AI</h1>
-<div class="sub">l'opinionista che ti legge i pronostici</div>
+<div class="sub">l'opinionista 3D che ti legge i pronostici</div>
 <div id="stage">
-<div id="sprite"></div>
-<img id="fallback" src="/logo.jpg" alt="Barista AI">
-<div id="mouthFx"></div>
+<div id="avatar"></div>
+<div id="loading"><div class="spin"></div><div id="loading-text">Caricamento avatar 3D…</div></div>
 </div>
 <div class="btns">
-<button id="b-pred">📢 Pronostici</button>
-<button id="b-table">🏆 Classifica</button>
-<button id="b-stop" class="ghost">⏹ Stop</button>
-<button id="b-scene" class="ghost">🎭 Scena</button>
+<button id="b-pred" disabled>📢 Pronostici</button>
+<button id="b-table" disabled>🏆 Classifica</button>
+<button id="b-stop" class="ghost" disabled>⏹ Stop</button>
 </div>
-<div id="scene">
-<div class="sgroup"><div class="lab">Viste</div><div class="srow" id="row-rotation"></div></div>
-<div class="sgroup"><div class="lab">Espressioni</div><div class="srow" id="row-expressions"></div></div>
-<div class="sgroup"><div class="lab">Gesti</div><div class="srow" id="row-gestures"></div></div>
-<div class="sgroup"><div class="lab">Pose</div><div class="srow" id="row-poses"></div></div>
-<div class="srow"><button class="chip" id="b-idle">↩ Torna idle</button></div>
+<div class="btns" id="row-view">
+<button class="chip" data-view="head">👤 Testa</button>
+<button class="chip on" data-view="upper">🗣 Bustino</button>
+<button class="chip" data-view="mid">👥 Mezzo</button>
+<button class="chip" data-view="full">🧍 Intero</button>
 </div>
+<div class="btns" id="row-mood">
+<button class="chip on" data-mood="happy">😀 Felice</button>
+<button class="chip" data-mood="neutral">😐 Neutro</button>
+<button class="chip" data-mood="angry">😠 Arrabbiato</button>
+<button class="chip" data-mood="sad">😢 Triste</button>
+</div>
+<div class="btns" id="row-gest">
+<button class="chip" data-gest="thumbup">👍 Mi piace</button>
+<button class="chip" data-gest="index">☝️ Indica</button>
+<button class="chip" data-gest="ok">👌 D'accordo</button>
+<button class="chip" data-gest="handup">✋ Mano su</button>
+<button class="chip" data-gest="shrug">🤷 Boh</button>
+</div>
+<div id="status"></div>
 <div id="log">Premi un pulsante e il barista parla…</div>
 <a href="/">← torna alla dashboard</a>
-<script>
-const stage=document.getElementById('stage'),sprEl=document.getElementById('sprite'),
-      log=document.getElementById('log'),fallback=document.getElementById('fallback'),
-      mouthFx=document.getElementById('mouthFx');
-let META=null,mode='idle',idleTimer=null,idleIdx=0,phonTimer=null,
-    fullText='',boundarySeen=false;
+<div class="credit">Avatar 3D: AvatarSDK demo (uso non commerciale) · TalkingHead MIT © Mika Suominen · Voce: Microsoft Edge TTS</div>
 
-async function init(){
-  try{
-    META=await fetch('/sprites.json').then(r=>r.json());
-    const img=new Image();
-    img.src='/avatar_sprites.png';
-    await img.decode();
-    buildScene();
-    startIdle();
-  }catch(e){
-    // fallback: logo + bocca CSS
-    sprEl.style.display='none';
-    fallback.style.display='block';
-    mouthFx.style.display='block';
-    log.textContent='Sprite non disponibili ('+e+'), uso il logo base.';
-  }
-}
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+  "talkinghead":"https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@1.7/modules/talkinghead.mjs"
+}}
+</script>
+<script type="module">
+import { TalkingHead } from 'talkinghead';
+import { LipsyncIt } from '/lipsync-it.mjs';
 
-function showFrame(name){
-  if(!META||!META.frames[name])return false;
-  const f=META.frames[name];
-  const target=Math.min(stage.clientWidth*0.82,330);
-  const scale=target/f.h;
-  sprEl.style.width=(f.w*scale)+'px';
-  sprEl.style.height=(f.h*scale)+'px';
-  sprEl.style.backgroundImage='url(/avatar_sprites.png)';
-  sprEl.style.backgroundSize=(META.canvas.width*scale)+'px '+(META.canvas.height*scale)+'px';
-  sprEl.style.backgroundPosition=(-f.x*scale)+'px '+(-f.y*scale)+'px';
-  sprEl.style.display='block';
-  fallback.style.display='none';
-  mouthFx.style.display='none';
-  return true;
-}
+const logEl = document.getElementById('log');
+const statusEl = document.getElementById('status');
+const loadingEl = document.getElementById('loading');
+const loadingText = document.getElementById('loading-text');
+let ready = false;
+let curWord = null;
 
-function startIdle(){
-  if(!META)return;
-  stopTimers(); mode='idle';
-  const ids=META.sections.idle.frames;
-  const step=()=>{
-    if(mode!=='idle')return;
-    showFrame(ids[idleIdx%ids.length]); idleIdx++;
-  };
-  step(); idleTimer=setInterval(step,130);
-}
-function stopTimers(){clearInterval(idleTimer);clearInterval(phonTimer);idleTimer=phonTimer=null;}
+function status(s){ statusEl.textContent = s || ''; }
+function log(s){ logEl.textContent = s; curWord = null; }
 
-// ---- fonemi: lettera → frame lip-sync ----
-function phoneme(ch){
-  const c=(ch||'').toLowerCase();
-  if('aeiouàèéìòù'.includes(c))return {a:'A',e:'E',i:'I',o:'O',u:'U',à:'A',è:'E',é:'E',ì:'I',ò:'O',ù:'U'}[c];
-  if('mbp'.includes(c))return c.toUpperCase();
-  if('fv'.includes(c))return c.toUpperCase();
-  if(c==='l')return 'L';
-  if('sz'.includes(c))return 'S';
-  if('tcq'.includes(c))return 'T';
-  if('dg'.includes(c))return 'D';
-  if(c==='n')return 'N';
-  if(c==='r')return 'R';
-  if(c==='h')return null;         // h muta: tiene il fotogramma
-  return null;                     // spazi/punteggiatura: non cambia
-}
+const head = new TalkingHead(document.getElementById('avatar'), {
+  lipsyncModules: [],
+  cameraView: 'upper',
+  cameraRotateEnable: true,
+  avatarMood: 'happy',
+  lipsyncLang: 'it'
+});
+head.lipsync['it'] = new LipsyncIt();
 
-function setPhoneme(ch){
-  const p=phoneme(ch);
-  if(!p)return;
-  stopPoseOnly();
-  showFrame(p);
-}
-function stopPoseOnly(){/* nessun timer pose da fermare */}
-
-// ---- gesto a inizio frase ----
-function gestureBurst(name,ms){
-  if(!META)return;
-  stopTimers(); mode='pose';
-  showFrame(name);
-  setTimeout(()=>{if(mode==='pose'&&speechSynthesis.speaking)talkFrames();},ms);
-}
-function talkFrames(){
-  if(!META)return;
-  mode='talk';
-  const step=()=>{if(!speechSynthesis.speaking)return;
-    // se nessun boundary arriva, cicla fonemi plausibili
-    setPhoneme(fullText[Math.floor(Math.random()*fullText.length)]||'e');};
-  phonTimer=setInterval(step,150);
+try {
+  await head.showAvatar({
+    url: 'https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@main/avatars/avatarsdk.glb',
+    body: 'M',
+    avatarMood: 'happy',
+    lipsyncLang: 'it',
+    retarget: {
+      Neck:   { z: -0.01, rx: -0.15 },
+      Neck1:  { z: -0.01, rx: -0.15 },
+      Neck2:  { z: -0.01, rx: -0.15 },
+      LeftShoulder:  { rz: -0.3 },
+      RightShoulder: { rz:  0.3 },
+      scaleToEyesLevel: 1.0,
+      origin: { y: -0.1 }
+    },
+    baseline: { headRotateX: -0.04, eyeBlinkLeft: 0.05, eyeBlinkRight: 0.05 }
+  }, (e) => {
+    if (e && e.total) {
+      const pct = Math.round(e.loaded / e.total * 100);
+      loadingText.textContent = `Caricamento avatar… ${pct}% (${(e.loaded/1048576).toFixed(0)} MB)`;
+    }
+  });
+  ready = true;
+  loadingEl.style.display = 'none';
+  ['b-pred','b-table','b-stop'].forEach(id => document.getElementById(id).disabled = false);
+  status('Avatar pronto ✓ — premi un pulsante');
+} catch (err) {
+  loadingText.textContent = '⚠️ Avatar non caricato: ' + (err && err.message || err);
+  status('Riprova: la rete potrebbe aver bloccato il CDN');
 }
 
 // ---- karaoke ----
-function buildKaraoke(text){
-  log.innerHTML='';
-  text.split(/(\s+)/).forEach(tok=>{
-    if(/^\s+$/.test(tok)){log.appendChild(document.createTextNode(tok));return;}
-    const s=document.createElement('span'); s.className='word'; s.textContent=tok;
-    log.appendChild(s);
+function onSubtitle(s){
+  const w = (s || '').trim();
+  if (!w) return;
+  if (curWord){ curWord.classList.remove('cur'); curWord.classList.add('past'); }
+  const sp = document.createElement('span');
+  sp.className = 'word cur';
+  sp.textContent = w + ' ';
+  logEl.appendChild(sp);
+  curWord = sp;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ---- TTS + lipsync ----
+async function speak(text, mood){
+  if (!ready){ status('Avatar non ancora pronto…'); return; }
+  try { head.stopSpeaking(); } catch(e){}
+  logEl.innerHTML = ''; curWord = null;
+  status('Sintesi vocale in corso…');
+  let d;
+  try {
+    const r = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    d = await r.json();
+  } catch(e){ d = { ok:false, err:'errore di rete' }; }
+  if (!d.ok){
+    status('');
+    log('⚠️ TTS non disponibile: ' + (d.err || 'errore sconosciuto'));
+    return;
+  }
+  try {
+    const bin = atob(d.audio);
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    if (head.audioCtx && head.audioCtx.state === 'suspended') await head.audioCtx.resume();
+    const audio = await head.audioCtx.decodeAudioData(u8.buffer);
+    head.setMood(mood || 'happy');
+    head.speakAudio(
+      { audio, words: d.words, wtimes: d.wtimes, wdurations: d.wdurations },
+      { lipsyncLang: 'it' },
+      onSubtitle
+    );
+    status(`Lingua: it · ${d.words.length} parole · ${d.ms}ms`);
+  } catch(err){
+    status('');
+    log('⚠️ Riproduzione non riuscita: ' + (err && err.message || err));
+  }
+}
+
+// ---- pulsanti scena ----
+function chipGroup(rowId, attr, fn){
+  const row = document.getElementById(rowId);
+  row.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b || !b.dataset[attr] || !ready) return;
+    row.querySelectorAll('.chip.on').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    fn(b.dataset[attr]);
   });
 }
-function highlightChar(idx){
-  const spans=[...log.querySelectorAll('.word')];
-  let acc=0,cur=null;
-  for(const s of spans){
-    const end=acc+s.textContent.length;
-    if(idx>=acc&&idx<end){cur=s;break;}
-    acc=end;
-  }
-  spans.forEach(s=>s.classList.remove('spoken'));
-  if(cur)cur.classList.add('spoken');
-}
-
-// ---- TTS ----
-function pickVoice(){const vs=speechSynthesis.getVoices();
-  return vs.find(v=>v.lang&&v.lang.toLowerCase().startsWith('it'))||vs[0];}
-function speak(t,gesture){
-  if(!('speechSynthesis' in window)){log.textContent='TTS non supportato.';return;}
-  speechSynthesis.cancel();
-  fullText=t; buildKaraoke(t);
-  const u=new SpeechSynthesisUtterance(t);
-  u.voice=pickVoice(); u.lang='it-IT'; u.rate=1.02;
-  u.onstart=()=>{
-    boundarySeen=false;
-    gestureBurst(gesture||'point',650);
-    // safety: se nessun boundary dopo 900ms → fonemi auto
-    setTimeout(()=>{if(!boundarySeen&&speechSynthesis.speaking)talkFrames();},900);
-  };
-  u.onboundary=(e)=>{
-    if(e.charIndex==null)return;
-    boundarySeen=true;
-    clearTimeout(u._to);
-    setPhoneme(t[e.charIndex]);
-    highlightChar(e.charIndex);
-    // reset a fonema chiuso dopo 180ms di silenzio tra i boundary
-    u._to=setTimeout(()=>{if(speechSynthesis.speaking)setPhoneme('M');},180);
-  };
-  u.onend=()=>{
-    stopTimers(); mode='pose';
-    if(META){showFrame('smile');setTimeout(()=>{if(!speechSynthesis.speaking)startIdle();},800);}
-    else startIdle();
-  };
-  u.onerror=u.onend;
-  speechSynthesis.speaking&&speechSynthesis.cancel();
-  speechSynthesis.speak(u);
-}
-
-// ---- scena (bottoni) ----
-function buildScene(){
-  const mk=(rowId,frames,label)=>{
-    const row=document.getElementById(rowId);
-    frames.forEach(name=>{
-      const b=document.createElement('button');
-      b.className='chip'; b.textContent=label?label(name):name;
-      b.onclick=()=>{stopTimers();mode='pose';showFrame(name);
-        document.querySelectorAll('.chip.on').forEach(x=>x.classList.remove('on'));
-        b.classList.add('on');};
-      row.appendChild(b);
-    });
-  };
-  mk('row-rotation',META.sections.rotation.frames);
-  mk('row-expressions',META.sections.expressions.frames);
-  mk('row-gestures',META.sections.gestures.frames);
-  mk('row-poses',META.sections.poses.frames);
-  document.getElementById('b-idle').onclick=()=>{
-    document.querySelectorAll('.chip.on').forEach(x=>x.classList.remove('on'));startIdle();};
-}
-document.getElementById('b-scene').onclick=()=>document.getElementById('scene').classList.toggle('open');
+chipGroup('row-view',  'view', v => { try{ head.setView(v); }catch(e){} });
+chipGroup('row-mood',  'mood', m => { try{ head.setMood(m); }catch(e){} });
+chipGroup('row-gest',  'gest', g => { try{ head.playGesture(g, 3); }catch(e){} });
 
 // ---- dati ----
-async function state(){const r=await fetch('/api/state');return r.json();}
-document.getElementById('b-pred').onclick=async(e)=>{e.target.disabled=true;
-  try{const s=await state();const fx=(s.fixtures||[]).slice(0,5);
-  if(!fx.length){speak('Non ci sono partite in programma, ripassa più tardi!','think');return;}
-  let t='Ecco i pronostici del bar. ';
-  for(const f of fx){const p=((f.predictions||{})['1x2'])||{};
-    const h=Math.round((p['1']||0)*100),d=Math.round((p.x||0)*100),a=Math.round((p['2']||0)*100);
-    t+=`${f.home} contro ${f.away}: ${h} per cento uno, ${d} pareggio, ${a} due. `;}
-  speak(t,'point');
-  }catch(err){speak('Non riesco a leggere i dati in questo momento.','think');}
-  e.target.disabled=false;};
-document.getElementById('b-table').onclick=async(e)=>{e.target.disabled=true;
-  try{const s=await state();const st=[...(s.standings||[])].sort((a,b)=>(a.position||99)-(b.position||99)).slice(0,5);
-  if(!st.length){speak('Classifica non disponibile.','think');return;}
-  let t='Le prime cinque in classifica. ';
-  st.forEach((r,i)=>{t+=`${i+1}, ${r.name} con ${r.points} punti. `;});
-  speak(t,'trophy_up');
-  }catch(err){speak('Non riesco a leggere la classifica.','think');}
-  e.target.disabled=false;};
-document.getElementById('b-stop').onclick=()=>{
-  speechSynthesis.cancel();stopTimers();startIdle();};
+async function state(){ const r = await fetch('/api/state'); return r.json(); }
 
-if('speechSynthesis' in window)speechSynthesis.getVoices();
-init();
+document.getElementById('b-pred').onclick = async (e) => {
+  e.target.disabled = true;
+  try {
+    const s = await state();
+    const fx = (s.fixtures || []).slice(0, 5);
+    if (!fx.length){ await speak('Non ci sono partite in programma, ripassa più tardi!', 'sad'); }
+    else {
+      let t = 'Ecco i pronostici del bar. ';
+      for (const f of fx){
+        const p = ((f.predictions || {})['1x2']) || {};
+        const h = Math.round((p['1'] || 0) * 100), d = Math.round((p.x || 0) * 100), a = Math.round((p['2'] || 0) * 100);
+        t += `${f.home} contro ${f.away}: ${h} per cento uno, ${d} pareggio, ${a} due. `;
+      }
+      await speak(t, 'happy');
+    }
+  } catch(err){
+    await speak('Non riesco a leggere i dati in questo momento.', 'sad');
+  } finally {
+    e.target.disabled = false;
+  }
+};
+
+document.getElementById('b-table').onclick = async (e) => {
+  e.target.disabled = true;
+  try {
+    const s = await state();
+    const st = [...(s.standings || [])].sort((a,b) => (a.position||99) - (b.position||99)).slice(0, 5);
+    if (!st.length){ await speak('Classifica non disponibile.', 'sad'); }
+    else {
+      let t = 'Le prime cinque in classifica. ';
+      st.forEach((r, i) => { t += `${i+1}, ${r.name} con ${r.points} punti. `; });
+      await speak(t, 'neutral');
+    }
+  } catch(err){
+    await speak('Non riesco a leggere la classifica.', 'sad');
+  } finally {
+    e.target.disabled = false;
+  }
+};
+
+document.getElementById('b-stop').onclick = () => {
+  try { head.stopSpeaking(); } catch(e){}
+  status('Interrotto');
+};
 </script>
 </body>
 </html>
