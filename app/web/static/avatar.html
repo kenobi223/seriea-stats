@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Barista AI · Serie A Stats</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;background:#070a14;color:#eee;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:20px}
+h1{font-size:20px;margin:8px 0 2px}.sub{color:#888;font-size:13px;margin-bottom:12px}
+#stage{width:min(320px,80vw);aspect-ratio:1;background:radial-gradient(circle at 50% 35%,#1c2547,#0a0e1f);border-radius:24px;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+#mouth{transition:height .09s linear}
+.btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:14px}
+button{background:#e94560;border:0;color:#fff;font-weight:700;padding:10px 16px;border-radius:999px;cursor:pointer;font-size:14px}
+button.ghost{background:#222b45}button:disabled{opacity:.5}
+#log{margin-top:14px;max-width:560px;width:100%;background:#10162b;border-radius:12px;padding:12px;font-size:14px;line-height:1.5;min-height:80px;white-space:pre-wrap}
+a{color:#7ea4ff;margin-top:12px;font-size:13px}
+</style>
+</head>
+<body>
+<h1>🎙️ Barista AI</h1>
+<div class="sub">l'opinionista che ti legge i pronostici</div>
+<div id="stage">
+<svg viewBox="0 0 200 200" width="240" height="240">
+<circle cx="100" cy="95" r="62" fill="#f2c99b"/>
+<circle cx="78" cy="85" r="7" fill="#fff"/><circle cx="78" cy="86" r="3.4" fill="#222"/>
+<circle cx="122" cy="85" r="7" fill="#fff"/><circle cx="122" cy="86" r="3.4" fill="#222"/>
+<path d="M100 30 Q30 30 38 95 Q60 60 100 58 Q140 60 162 95 Q170 30 100 30" fill="#3a2a1a"/>
+<rect id="mouth" x="80" y="118" width="40" height="6" rx="3" fill="#7a2e2e"/>
+<rect x="60" y="150" width="80" height="34" rx="10" fill="#0a7d44"/>
+<circle cx="100" cy="162" r="9" fill="#fff"/><polygon points="100,155 105,162 100,169 95,162" fill="#0a7d44"/>
+</svg>
+</div>
+<div class="btns">
+<button id="b-pred">📢 Pronostici</button>
+<button id="b-table">🏆 Classifica</button>
+<button id="b-stop" class="ghost">⏹ Stop</button>
+</div>
+<div id="log">Premi un pulsante e il barista parla…</div>
+<a href="/">← torna alla dashboard</a>
+<script>
+const log=document.getElementById('log'),mouth=document.getElementById('mouth');
+let talkTimer=null;
+function pickVoice(){const vs=speechSynthesis.getVoices();return vs.find(v=>v.lang&&v.lang.toLowerCase().startsWith('it'))||vs[0];}
+function animate(on){clearInterval(talkTimer);if(!on){mouth.setAttribute('height',6);return;}
+talkTimer=setInterval(()=>{if(!speechSynthesis.speaking){animate(false);return;}
+mouth.setAttribute('height',4+Math.round(Math.random()*14));});}
+function speak(t){speechSynthesis.cancel();log.textContent=t;const u=new SpeechSynthesisUtterance(t);
+u.voice=pickVoice();u.lang='it-IT';u.rate=1.02;u.onstart=()=>animate(true);u.onend=()=>animate(false);
+speechSynthesis.speak(u);}
+if('speechSynthesis' in window){speechSynthesis.getVoices();}
+async function state(){const r=await fetch('/api/state');return r.json();}
+document.getElementById('b-pred').onclick=async(e)=>{e.target.disabled=true;
+try{const s=await state();const fx=(s.fixtures||[]).slice(0,5);
+if(!fx.length){speak('Non ci sono partite in programma, ripassa più tardi!');return;}
+let t='Ecco i pronostici del bar. ';for(const f of fx){const p=((f.predictions||{})['1x2'])||{};
+const h=Math.round((p['1']||0)*100),d=Math.round((p.x||0)*100),a=Math.round((p['2']||0)*100);
+t+=`${f.home} contro ${f.away}: ${h} per cento uno, ${d} pareggio, ${a} due. `;}speak(t);
+}catch(err){speak('Non riesco a leggere i dati in questo momento.');}e.target.disabled=false;};
+document.getElementById('b-table').onclick=async(e)=>{e.target.disabled=true;
+try{const s=await state();const st=[...(s.standings||[])].sort((a,b)=>(a.position||99)-(b.position||99)).slice(0,5);
+if(!st.length){speak('Classifica non disponibile.');return;}
+let t='Le prime cinque in classifica. ';st.forEach((r,i)=>{t+=`${i+1}, ${r.name} con ${r.points} punti. `;});speak(t);
+}catch(err){speak('Non riesco a leggere la classifica.');}e.target.disabled=false;};
+document.getElementById('b-stop').onclick=()=>{speechSynthesis.cancel();animate(false);};
+</script>
+</body>
+</html>

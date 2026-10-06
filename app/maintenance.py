@@ -1,13 +1,10 @@
-"""Manutenzione dual-AI: Big Pickle (20') e Muse Spark 1.3 (35').
+"""Manutenzione triple-AI: Big Pickle (5') + Muse Spark 1.3 (8') + Mimo QA (10').
 
-Due ingegneri informatici super organizzati, miglior titolo in web design &
-development, amano codificare pulito, modernizzare e aggiungere chicche:
-- a livello codice: migliorano i pronostici (Poisson, xG, calibrazione)
-- a livello design: modernizzano UI, aggiungono registrazione, PWA iPhone/Android
-Girano nel server (Render/Koyeb) senza PC acceso. Si parlano via
-data/maintenance.json: il 20' fa check rapido, il 35' fa deep fix
-e autodeploya con git push se approvato da @Ziosapi.
-Quando si svegliano sono super carichi e cercano nei forum le ultime novità webdev.
+Tre agenti autonomi, ZERO richieste di OK/Rifiuta: applicano da soli i fix
+utili con backup + validazione + rollback se qualcosa si rompe, poi mandano
+all'owner un resoconto sintetico (cosa aggiunto + a cosa serve).
+Cercano repo stellati su GitHub da integrare per rendere il progetto pazzesco.
+Girano nel server (Render) senza PC acceso. Si parlano via data/maintenance.json.
 """
 import json
 import logging
@@ -107,20 +104,21 @@ def _apply_fixes(fixes):
                 continue
             except Exception as e:
                 log.error("fix whitelist fallita: %s → %s", fix, e)
-        # 2. LLM reale: genera fix su misura (MAI su file frontend protetti in auto)
-        _PROTECTED = ("app.js", "style.css", "index.html")
+        # 2. LLM reale: genera fix su misura (con anti-disastro sotto)
         try:
             from app.analysis.codegen import generate_fix
             changes = generate_fix(fix)
             if changes:
                 for ch in changes:
-                    _base = ch["path"].replace("\\", "/").split("/")[-1]
-                    if _base in _PROTECTED and "static" in ch["path"].replace("\\", "/"):
-                        log.warning("codegen: file protetto %s, serve OK manuale", ch["path"])
-                        applied.append({"fix": fix, "result": "file protetto %s: serve OK manuale" % ch["path"], "changed": False})
-                        continue
                     fp = _STATIC.parent.parent / ch["path"]
                     old = fp.read_text(encoding="utf-8") if fp.exists() else ""
+                    # anti-disastro: se il file esiste e la riscrittura è <50%
+                    # della dimensione originale → scarta (era una cancellazione)
+                    if old and len(ch["content"]) < len(old) * 0.5:
+                        log.warning("codegen: riscrittura %s scartata (%d→%d char, sembra cancellazione)",
+                                    ch["path"], len(old), len(ch["content"]))
+                        applied.append({"fix": fix, "result": "%s scartato: riscrittura distruttiva" % ch["path"], "changed": False})
+                        continue
                     fp.parent.mkdir(parents=True, exist_ok=True)
                     fp.write_text(ch["content"], encoding="utf-8")
                     changed = old != ch["content"]
@@ -386,6 +384,51 @@ def _latest_webdev_ideas():
         pass
     return ["PWA installabile iPhone/Android", "WebAuthn registrazione senza password", "View Transitions API per animazioni fluide"]
 
+def _github_trending():
+    """Repo GitHub stellati utili al progetto (cache giornaliera in maintenance.json).
+    Cerca repo popolari su football analytics, chatbot UI, avatar TTS."""
+    try:
+        state = _read()
+        cache = state.get("github_trending") or {}
+        if int(time.time()) - cache.get("at", 0) < 24 * 3600 and cache.get("repos"):
+            return cache["repos"]
+    except Exception:
+        cache = {}
+    repos = []
+    queries = [
+        "football+prediction+language:python",
+        "sports+betting+language:python",
+        "talking+avatar+text+to+speech+language:javascript",
+    ]
+    try:
+        for q in queries:
+            r = requests.get(
+                "https://api.github.com/search/repositories",
+                params={"q": q, "sort": "stars", "order": "desc", "per_page": 3},
+                timeout=10, headers={"User-Agent": "seriea-stats-bot"},
+            )
+            if r.status_code != 200:
+                continue
+            for it in (r.json().get("items") or []):
+                repos.append({
+                    "name": it.get("full_name"),
+                    "stars": it.get("stargazers_count"),
+                    "desc": (it.get("description") or "")[:120],
+                    "url": it.get("html_url"),
+                })
+            time.sleep(1)
+    except Exception as e:
+        log.debug("github trending fallito: %s", e)
+    if repos:
+        try:
+            state = _read()
+            state["github_trending"] = {"at": int(time.time()), "repos": repos[:9]}
+            _write(state)
+        except Exception:
+            pass
+        return repos[:9]
+    return (cache.get("repos") or [])
+
 class BigPickleAgent(threading.Thread):
     """Ogni 20' - ingegnere web design, check rapido + cerca idee forum."""
     def __init__(self, store):
@@ -561,99 +604,77 @@ class MuseSparkAgent(threading.Thread):
             _write(state)
             return
         fixed = joint.get("fixes") or []
-        # deduplica: se stessa proposta già pending/rifiutata/approvata, skip a meno che non sia migliore
-        pending = state.get("pending_proposal")
-        rejected = set(state.get("rejected_ids") or [])
-        approved = set(p.get("id") for p in (state.get("approved_history") or []) if p.get("id"))
+        # dedup: stesso fix già applicato nelle ultime 24h → skip
+        applied_ids = {p.get("id") for p in (state.get("approved_history") or [])
+                       if p.get("id") and int(time.time()) - p.get("at", 0) < 24 * 3600}
         proposal_id = str(hash(tuple(sorted(fixed))))[:8] if fixed else str(int(time.time()))
-        if fixed and proposal_id in rejected:
-            prev_fix_len = len((state.get("last_rejected_fix") or []))
-            if len(fixed) <= prev_fix_len:
-                log.info("maintenance: proposta %s già rifiutata, skip", proposal_id)
-                state["muse_spark"] = {"at": int(time.time()), "joint": joint, "fixed": [], "skipped": "già rifiutata"}
-                _write(state)
-                return
-        if fixed and proposal_id in approved:
-            log.info("maintenance: proposta %s già approvata di recente, skip", proposal_id)
-            state["muse_spark"] = {"at": int(time.time()), "joint": joint, "fixed": [], "skipped": "già approvata"}
+        if fixed and proposal_id in applied_ids:
+            log.info("maintenance: fix %s già applicato <24h fa, skip", proposal_id)
+            state["muse_spark"] = {"at": int(time.time()), "joint": joint, "fixed": [],
+                                   "skipped": "già applicato <24h"}
             _write(state)
             return
-        if pending and pending.get("status") == "pending":
-            log.info("maintenance: proposta %s già in attesa di OK, skip", pending.get("id"))
-            return
-        # --- auto-apply: solo se TUTTI E TRE gli agenti sono d'accordo E il fix
-        #     è whitelist (niente LLM su file custom). Altrimenti proposta manuale.
-        #     Se applica e rompe (handler fallisce / manifest JSON invalido),
-        #     ripristina il backup e passa a proposta manuale.
-        mimo_ok = any("[Mimo]" in (i or "") for i in (joint.get("issues") or []))
-        auto_safe = bool(fixed) and all(
-            any(pat in f.strip().lower() for pat in _APPLY_MAP)
-            for f in fixed
-        )
-        if mimo_ok and auto_safe:
-            _backup = {}
-            try:
-                for _bf in ("sw.js", "manifest.json"):
-                    _bp = _STATIC / _bf
-                    if _bp.exists():
-                        _backup[_bf] = _bp.read_text(encoding="utf-8")
-                applied, has_new, modified_files = _apply_fixes(fixed)
-                # valida: manifest deve restare JSON valido
-                _mp = _STATIC / "manifest.json"
-                if _mp.exists():
-                    json.loads(_mp.read_text(encoding="utf-8"))
-                if has_new:
-                    push_ok, push_msg = _git_push(
-                        "fix(auto): " + ", ".join(fixed),
-                        files=modified_files if modified_files else None,
-                    )
-                    _notify_owner("✅ Auto-fix dei 3 agenti applicato: %s\nPush: %s" % (
-                        ", ".join(modified_files) if modified_files else "nessun file",
-                        push_msg,
-                    ))
-                history = state.get("approved_history") or []
-                history.append({"id": proposal_id, "at": int(time.time()),
-                                "issues": joint.get("issues"), "fixes": fixed,
-                                "reason": joint.get("reason"), "status": "auto-applied"})
-                state["approved_history"] = history[-10:]
-                state["pending_fix"] = False
-                state["muse_spark"] = {"at": int(time.time()), "joint": joint,
-                                       "fixed": fixed, "auto_applied": True}
-                state["checks"].append({"by": "muse-spark", "at": int(time.time()),
-                                        "joint": joint, "fixed": fixed,
-                                        "auto_applied": True})
-                _write(state)
-                log.info("maintenance: auto-fix %s applicato (3 agenti d'accordo)", proposal_id)
-                return
-            except Exception as e:
-                log.error("maintenance: auto-fix %s fallito, rollback: %s", proposal_id, e)
-                for _bf, _content in _backup.items():
-                    try:
-                        (_STATIC / _bf).write_text(_content, encoding="utf-8")
-                    except Exception:
-                        pass
-                # cade alla proposta manuale qui sotto
         state["muse_spark"] = {"at": int(time.time()), "joint": joint, "fixed": fixed}
         state["checks"].append({"by": "muse-spark", "at": int(time.time()), "joint": joint, "fixed": fixed})
         if not fixed:
             state["pending_fix"] = False
             _write(state)
             return
-        # crea proposta in attesa di OK
-        proposal = {
-            "id": proposal_id,
-            "at": int(time.time()),
-            "issues": joint.get("issues"),
-            "fixes": fixed,
-            "news": joint.get("news"),
-            "reason": joint.get("reason"),
-            "status": "pending"
-        }
-        state["pending_proposal"] = proposal
-        state["pending_fix"] = True
+        # --- AUTO-APPLY TOTALE (niente OK/Rifiuta): backup, applica, valida,
+        #     se rompe → rollback e avviso. Poi resoconto sintetico all'owner.
+        backup = {}
+        try:
+            base_dir = pathlib.Path(__file__).resolve().parent.parent
+            for _rel in ("app/web/static/sw.js", "app/web/static/manifest.json",
+                         "app/web/static/app.js", "app/web/static/style.css",
+                         "app/web/static/index.html"):
+                _bp = base_dir / _rel
+                if _bp.exists():
+                    backup[_rel] = _bp.read_text(encoding="utf-8")
+            applied, has_new, modified_files = _apply_fixes(fixed)
+            # valida: manifest JSON valido + .py compilabili
+            _mp = _STATIC / "manifest.json"
+            if _mp.exists():
+                json.loads(_mp.read_text(encoding="utf-8"))
+            for _mf in modified_files:
+                if _mf.endswith(".py"):
+                    import py_compile
+                    py_compile.compile(str(base_dir / _mf), doraise=True)
+            if has_new:
+                push_ok, push_msg = _git_push(
+                    "feat(auto): " + ", ".join(fixed)[:120],
+                    files=modified_files if modified_files else None,
+                )
+            else:
+                push_ok, push_msg = True, "niente di nuovo"
+            # resoconto sintetico: cosa aggiunto + a cosa serve
+            lines = ["🤖 Agenti: cosa ho aggiunto", ""]
+            for a in applied:
+                if a.get("changed"):
+                    lines.append("• %s → %s" % (a.get("fix"), a.get("result")))
+            if not any(a.get("changed") for a in applied):
+                lines.append("• nessun file cambiato (era già a posto)")
+            lines.append("")
+            lines.append("A cosa serve: %s" % (joint.get("reason") or "manutenzione"))
+            lines.append("Deploy: %s" % push_msg)
+            _notify_owner("\n".join(lines)[:900])
+            history = state.get("approved_history") or []
+            history.append({"id": proposal_id, "at": int(time.time()),
+                            "issues": joint.get("issues"), "fixes": fixed,
+                            "reason": joint.get("reason"), "status": "auto-applied"})
+            state["approved_history"] = history[-10:]
+            state["pending_fix"] = False
+            log.info("maintenance: auto-fix %s applicato + resoconto", proposal_id)
+        except Exception as e:
+            log.error("maintenance: auto-fix %s fallito, rollback: %s", proposal_id, e)
+            base_dir = pathlib.Path(__file__).resolve().parent.parent
+            for _rel, _content in backup.items():
+                try:
+                    (base_dir / _rel).write_text(_content, encoding="utf-8")
+                except Exception:
+                    pass
+            _notify_owner("⚠️ Agenti: fix fallito e annullato (%s). Niente rotto." % str(e)[:150])
         _write(state)
-        _notify_owner_proposal(proposal)
-        log.info("maintenance: proposta %s inviata a @Ziosapi in attesa di OK/Rifiuta", proposal_id)
 
     def _joint_reasoning(self, issues, news):
         """Due ingegneri ragionano insieme: fix utili, sicuri + chicche modernizzazione."""
@@ -684,8 +705,13 @@ class MuseSparkAgent(threading.Thread):
         news_ctx = "; ".join(news[:3]) if news else "nessuna news mister"
         correct = sum(1 for a in analysis if a.startswith("✅"))
         wrong = sum(1 for a in analysis if a.startswith("❌"))
-        # idee fresche dal forum
+        # idee fresche dal forum + repo GitHub stellati da integrare
         ideas = _latest_webdev_ideas()
+        try:
+            for repo in _github_trending()[:3]:
+                ideas.append("⭐ %s (%s★): %s" % (repo["name"], repo["stars"], repo["desc"]))
+        except Exception:
+            pass
         reason = f"analisi {correct}/{len(analysis)} corrette - algoritmo {'ok' if correct>=wrong else 'da rivedere'}; news: {news_ctx[:60]}; idea top: {ideas[0]}"
         if chicche:
             reason += f" | chicca proposta: {chicche[0]}"
@@ -706,6 +732,6 @@ class MuseSparkAgent(threading.Thread):
             "fixes": fixes if safe else [],
             "safe": safe,
             "reason": reason if safe else f"skip per issue non whitelist: {critical[:1]}",
-            "agents": ["big-pickle-ingegnere-20m", "muse-spark-ingegnere-35m"],
+            "agents": ["big-pickle-ingegnere-20m", "muse-spark-ingegnere-35m", "mimo-qa-10m"],
             "ideas": ideas,
         }
