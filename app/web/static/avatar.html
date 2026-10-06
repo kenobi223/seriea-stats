@@ -8,15 +8,18 @@
 *{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;background:#070a14;color:#eee;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:20px}
 h1{font-size:20px;margin:8px 0 2px}.sub{color:#888;font-size:13px;margin-bottom:12px}
 #stage{width:min(320px,80vw);aspect-ratio:1;background:radial-gradient(circle at 50% 35%,#1c2547,#0a0e1f);border-radius:24px;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 40px rgba(0,0,0,.5);overflow:hidden}
-#avatarWrap{position:relative;width:100%;height:100%}
+#avatarWrap{position:relative;width:100%;height:100%;transform-origin:50% 90%}
 #avatarWrap img{width:100%;height:100%;object-fit:cover;display:block}
-#avatarWrap.talking img{animation:bob .28s ease-in-out infinite alternate}
-@keyframes bob{from{transform:translateY(0) scale(1)}to{transform:translateY(-6px) scale(1.02)}}
-#mouthFx{position:absolute;left:43%;top:40%;width:14%;height:8px;background:#5a1f1f;border-radius:50%;transition:height .09s linear;box-shadow:inset 0 -2px 4px rgba(0,0,0,.5)}
+#avatarWrap.idle img{animation:sway 3.2s ease-in-out infinite}
+@keyframes sway{0%,100%{transform:rotate(-1.2deg) translateY(0)}50%{transform:rotate(1.2deg) translateY(-4px)}}
+#avatarWrap.talking img{animation:bob .3s ease-in-out infinite alternate}
+@keyframes bob{from{transform:translateY(0) rotate(-1deg) scale(1)}to{transform:translateY(-7px) rotate(1deg) scale(1.02)}}
+#mouthFx{position:absolute;left:43%;top:40%;width:14%;height:6px;background:#5a1f1f;border-radius:50%;transition:all .06s linear;box-shadow:inset 0 -2px 4px rgba(0,0,0,.5)}
 .btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:14px}
 button{background:#e94560;border:0;color:#fff;font-weight:700;padding:10px 16px;border-radius:999px;cursor:pointer;font-size:14px}
 button.ghost{background:#222b45}button:disabled{opacity:.5}
-#log{margin-top:14px;max-width:560px;width:100%;background:#10162b;border-radius:12px;padding:12px;font-size:14px;line-height:1.5;min-height:80px;white-space:pre-wrap}
+#log{margin-top:14px;max-width:560px;width:100%;background:#10162b;border-radius:12px;padding:12px;font-size:14px;line-height:1.7;min-height:80px;white-space:pre-wrap}
+#log .spoken{color:#e94560;font-weight:700}
 a{color:#7ea4ff;margin-top:12px;font-size:13px}
 </style>
 </head>
@@ -24,7 +27,7 @@ a{color:#7ea4ff;margin-top:12px;font-size:13px}
 <h1>🎙️ Barista AI</h1>
 <div class="sub">l'opinionista che ti legge i pronostici</div>
 <div id="stage">
-<div id="avatarWrap">
+<div id="avatarWrap" class="idle">
 <img src="/logo.jpg" alt="Barista AI">
 <div id="mouthFx"></div>
 </div>
@@ -38,16 +41,29 @@ a{color:#7ea4ff;margin-top:12px;font-size:13px}
 <a href="/">← torna alla dashboard</a>
 <script>
 const log=document.getElementById('log'),mouth=document.getElementById('mouthFx'),wrap=document.getElementById('avatarWrap');
-let talkTimer=null;
+let talkTimer=null,fullText='',useBoundary=false;
+// visemi: forma bocca per classe di fonema (larghezza%, altezza px)
+const VISEMES={'a':[100,20],'e':[85,12],'i':[70,7],'o':[60,18],'u':[48,16],'m':[60,3],'b':[60,3],'p':[60,4],'f':[75,6],'v':[75,6],'l':[65,10],'t':[65,9],'d':[65,9],'n':[65,9],'s':[55,6],'c':[55,6],'r':[70,11],'g':[70,11],' ': [60,5]};
+function viseme(ch){const v=VISEMES[(ch||' ').toLowerCase()];return v||[70,10];}
+function setMouth(ch){const[w,h]=viseme(ch);mouth.style.width=(14*w/100)+'%';mouth.style.left=(50-7*w/100)+'%';mouth.style.height=h+'px';}
 function pickVoice(){const vs=speechSynthesis.getVoices();return vs.find(v=>v.lang&&v.lang.toLowerCase().startsWith('it'))||vs[0];}
-function animate(on){clearInterval(talkTimer);wrap.classList.remove('talking');if(!on){mouth.style.height='8px';return;}
-wrap.classList.add('talking');
+function renderKaraoke(upto){const a=fullText.slice(0,upto),b=fullText.slice(upto);
+log.innerHTML='';const s1=document.createElement('span');s1.className='spoken';s1.textContent=a;
+const s2=document.createElement('span');s2.textContent=b;log.appendChild(s1);log.appendChild(s2);}
+function animate(on){clearInterval(talkTimer);wrap.classList.remove('talking');wrap.classList.add('idle');
+if(!on){setMouth(' ');renderPlain();return;}
+wrap.classList.remove('idle');wrap.classList.add('talking');
+if(useBoundary)return; // la bocca la guidano gli eventi boundary
 talkTimer=setInterval(()=>{if(!speechSynthesis.speaking){animate(false);return;}
-mouth.style.height=(4+Math.round(Math.random()*16))+'px';});}
-function speak(t){speechSynthesis.cancel();log.textContent=t;const u=new SpeechSynthesisUtterance(t);
-u.voice=pickVoice();u.lang='it-IT';u.rate=1.02;u.onstart=()=>animate(true);u.onend=()=>animate(false);
+setMouth(fullText[Math.floor(Math.random()*fullText.length)]||'a');},90);}
+function renderPlain(){log.innerHTML='';log.textContent=fullText;}
+function speak(t){speechSynthesis.cancel();fullText=t;renderPlain();
+const u=new SpeechSynthesisUtterance(t);u.voice=pickVoice();u.lang='it-IT';u.rate=1.02;
+u.onboundary=(e)=>{if(e.charIndex==null)return;useBoundary=true;
+renderKaraoke(e.charIndex);setMouth(t[e.charIndex]);};
+u.onstart=()=>{useBoundary=false;animate(true);};u.onend=()=>animate(false);u.onerror=()=>animate(false);
 speechSynthesis.speak(u);}
-if('speechSynthesis' in window){speechSynthesis.getVoices();}
+if('speechSynthesis' in window){speechSynthesis.getVoices();if(speechSynthesis.onvoiceschanged!==undefined){speechSynthesis.onvoiceschanged=()=>{};}}
 async function state(){const r=await fetch('/api/state');return r.json();}
 document.getElementById('b-pred').onclick=async(e)=>{e.target.disabled=true;
 try{const s=await state();const fx=(s.fixtures||[]).slice(0,5);
