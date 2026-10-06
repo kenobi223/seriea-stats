@@ -5,20 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Barista AI · Serie A Stats</title>
 <style>
-*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;background:#070a14;color:#eee;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:20px}
-h1{font-size:20px;margin:8px 0 2px}.sub{color:#888;font-size:13px;margin-bottom:12px}
-#stage{width:min(320px,80vw);aspect-ratio:1;background:radial-gradient(circle at 50% 35%,#1c2547,#0a0e1f);border-radius:24px;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 40px rgba(0,0,0,.5);overflow:hidden}
-#avatarWrap{position:relative;width:100%;height:100%;transform-origin:50% 90%}
-#avatarWrap img{width:100%;height:100%;object-fit:cover;display:block}
-#avatarWrap.idle img{animation:sway 3.2s ease-in-out infinite}
-@keyframes sway{0%,100%{transform:rotate(-1.2deg) translateY(0)}50%{transform:rotate(1.2deg) translateY(-4px)}}
-#avatarWrap.talking img{animation:bob .3s ease-in-out infinite alternate}
-@keyframes bob{from{transform:translateY(0) rotate(-1deg) scale(1)}to{transform:translateY(-7px) rotate(1deg) scale(1.02)}}
-#mouthFx{position:absolute;left:43%;top:40%;width:14%;height:6px;background:#5a1f1f;border-radius:50%;transition:all .06s linear;box-shadow:inset 0 -2px 4px rgba(0,0,0,.5)}
-.btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:14px}
-button{background:#e94560;border:0;color:#fff;font-weight:700;padding:10px 16px;border-radius:999px;cursor:pointer;font-size:14px}
-button.ghost{background:#222b45}button:disabled{opacity:.5}
-#log{margin-top:14px;max-width:560px;width:100%;background:#10162b;border-radius:12px;padding:12px;font-size:14px;line-height:1.7;min-height:80px;white-space:pre-wrap}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,system-ui,sans-serif;background:#070a14;color:#eee;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:20px}
+h1{font-size:20px;margin:8px 0 2px}
+.sub{color:#888;font-size:13px;margin-bottom:12px}
+#stage{width:min(360px,85vw);aspect-ratio:1;background:radial-gradient(circle at 50% 35%,#1c2547,#0a0e1f);border-radius:24px;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 40px rgba(0,0,0,.5);overflow:hidden;position:relative}
+#sprite{background-repeat:no-repeat;transition:opacity .12s}
+#fallback{display:none;width:80%;height:80%;object-fit:cover;border-radius:50%}
+#mouthFx{display:none;position:absolute;left:43%;top:40%;width:14%;height:6px;background:#5a1f1f;border-radius:50%;box-shadow:inset 0 -2px 4px rgba(0,0,0,.5)}
+.btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:12px}
+button{background:#e94560;border:0;color:#fff;font-weight:700;padding:9px 15px;border-radius:999px;cursor:pointer;font-size:13px}
+button.ghost{background:#222b45}
+button.chip{background:#1b2440;font-weight:600;font-size:12px;padding:6px 12px}
+button.chip.on{background:#e94560}
+button:disabled{opacity:.5}
+#scene{margin-top:8px;width:min(560px,100%);display:none;background:#10162b;border-radius:14px;padding:12px}
+#scene.open{display:block}
+.sgroup{margin-bottom:8px}
+.sgroup .lab{font-size:11px;color:#7d8bb0;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
+.srow{display:flex;gap:6px;flex-wrap:wrap}
+#log{margin-top:14px;max-width:560px;width:100%;background:#10162b;border-radius:12px;padding:12px;font-size:14px;line-height:1.8;min-height:70px;white-space:pre-wrap}
 #log .spoken{color:#e94560;font-weight:700}
 a{color:#7ea4ff;margin-top:12px;font-size:13px}
 </style>
@@ -27,57 +33,219 @@ a{color:#7ea4ff;margin-top:12px;font-size:13px}
 <h1>🎙️ Barista AI</h1>
 <div class="sub">l'opinionista che ti legge i pronostici</div>
 <div id="stage">
-<div id="avatarWrap" class="idle">
-<img src="/logo.jpg" alt="Barista AI">
+<div id="sprite"></div>
+<img id="fallback" src="/logo.jpg" alt="Barista AI">
 <div id="mouthFx"></div>
-</div>
 </div>
 <div class="btns">
 <button id="b-pred">📢 Pronostici</button>
 <button id="b-table">🏆 Classifica</button>
 <button id="b-stop" class="ghost">⏹ Stop</button>
+<button id="b-scene" class="ghost">🎭 Scena</button>
+</div>
+<div id="scene">
+<div class="sgroup"><div class="lab">Viste</div><div class="srow" id="row-rotation"></div></div>
+<div class="sgroup"><div class="lab">Espressioni</div><div class="srow" id="row-expressions"></div></div>
+<div class="sgroup"><div class="lab">Gesti</div><div class="srow" id="row-gestures"></div></div>
+<div class="sgroup"><div class="lab">Pose</div><div class="srow" id="row-poses"></div></div>
+<div class="srow"><button class="chip" id="b-idle">↩ Torna idle</button></div>
 </div>
 <div id="log">Premi un pulsante e il barista parla…</div>
 <a href="/">← torna alla dashboard</a>
 <script>
-const log=document.getElementById('log'),mouth=document.getElementById('mouthFx'),wrap=document.getElementById('avatarWrap');
-let talkTimer=null,fullText='',useBoundary=false;
-// visemi: forma bocca per classe di fonema (larghezza%, altezza px)
-const VISEMES={'a':[100,20],'e':[85,12],'i':[70,7],'o':[60,18],'u':[48,16],'m':[60,3],'b':[60,3],'p':[60,4],'f':[75,6],'v':[75,6],'l':[65,10],'t':[65,9],'d':[65,9],'n':[65,9],'s':[55,6],'c':[55,6],'r':[70,11],'g':[70,11],' ': [60,5]};
-function viseme(ch){const v=VISEMES[(ch||' ').toLowerCase()];return v||[70,10];}
-function setMouth(ch){const[w,h]=viseme(ch);mouth.style.width=(14*w/100)+'%';mouth.style.left=(50-7*w/100)+'%';mouth.style.height=h+'px';}
-function pickVoice(){const vs=speechSynthesis.getVoices();return vs.find(v=>v.lang&&v.lang.toLowerCase().startsWith('it'))||vs[0];}
-function renderKaraoke(upto){const a=fullText.slice(0,upto),b=fullText.slice(upto);
-log.innerHTML='';const s1=document.createElement('span');s1.className='spoken';s1.textContent=a;
-const s2=document.createElement('span');s2.textContent=b;log.appendChild(s1);log.appendChild(s2);}
-function animate(on){clearInterval(talkTimer);wrap.classList.remove('talking');wrap.classList.add('idle');
-if(!on){setMouth(' ');renderPlain();return;}
-wrap.classList.remove('idle');wrap.classList.add('talking');
-if(useBoundary)return; // la bocca la guidano gli eventi boundary
-talkTimer=setInterval(()=>{if(!speechSynthesis.speaking){animate(false);return;}
-setMouth(fullText[Math.floor(Math.random()*fullText.length)]||'a');},90);}
-function renderPlain(){log.innerHTML='';log.textContent=fullText;}
-function speak(t){speechSynthesis.cancel();fullText=t;renderPlain();
-const u=new SpeechSynthesisUtterance(t);u.voice=pickVoice();u.lang='it-IT';u.rate=1.02;
-u.onboundary=(e)=>{if(e.charIndex==null)return;useBoundary=true;
-renderKaraoke(e.charIndex);setMouth(t[e.charIndex]);};
-u.onstart=()=>{useBoundary=false;animate(true);};u.onend=()=>animate(false);u.onerror=()=>animate(false);
-speechSynthesis.speak(u);}
-if('speechSynthesis' in window){speechSynthesis.getVoices();if(speechSynthesis.onvoiceschanged!==undefined){speechSynthesis.onvoiceschanged=()=>{};}}
+const stage=document.getElementById('stage'),sprEl=document.getElementById('sprite'),
+      log=document.getElementById('log'),fallback=document.getElementById('fallback'),
+      mouthFx=document.getElementById('mouthFx');
+let META=null,mode='idle',idleTimer=null,idleIdx=0,phonTimer=null,
+    fullText='',boundarySeen=false;
+
+async function init(){
+  try{
+    META=await fetch('/sprites.json').then(r=>r.json());
+    const img=new Image();
+    img.src='/avatar_sprites.png';
+    await img.decode();
+    buildScene();
+    startIdle();
+  }catch(e){
+    // fallback: logo + bocca CSS
+    sprEl.style.display='none';
+    fallback.style.display='block';
+    mouthFx.style.display='block';
+    log.textContent='Sprite non disponibili ('+e+'), uso il logo base.';
+  }
+}
+
+function showFrame(name){
+  if(!META||!META.frames[name])return false;
+  const f=META.frames[name];
+  const target=Math.min(stage.clientWidth*0.82,330);
+  const scale=target/f.h;
+  sprEl.style.width=(f.w*scale)+'px';
+  sprEl.style.height=(f.h*scale)+'px';
+  sprEl.style.backgroundImage='url(/avatar_sprites.png)';
+  sprEl.style.backgroundSize=(META.canvas.width*scale)+'px '+(META.canvas.height*scale)+'px';
+  sprEl.style.backgroundPosition=(-f.x*scale)+'px '+(-f.y*scale)+'px';
+  sprEl.style.display='block';
+  fallback.style.display='none';
+  mouthFx.style.display='none';
+  return true;
+}
+
+function startIdle(){
+  if(!META)return;
+  stopTimers(); mode='idle';
+  const ids=META.sections.idle.frames;
+  const step=()=>{
+    if(mode!=='idle')return;
+    showFrame(ids[idleIdx%ids.length]); idleIdx++;
+  };
+  step(); idleTimer=setInterval(step,130);
+}
+function stopTimers(){clearInterval(idleTimer);clearInterval(phonTimer);idleTimer=phonTimer=null;}
+
+// ---- fonemi: lettera → frame lip-sync ----
+function phoneme(ch){
+  const c=(ch||'').toLowerCase();
+  if('aeiouàèéìòù'.includes(c))return {a:'A',e:'E',i:'I',o:'O',u:'U',à:'A',è:'E',é:'E',ì:'I',ò:'O',ù:'U'}[c];
+  if('mbp'.includes(c))return c.toUpperCase();
+  if('fv'.includes(c))return c.toUpperCase();
+  if(c==='l')return 'L';
+  if('sz'.includes(c))return 'S';
+  if('tcq'.includes(c))return 'T';
+  if('dg'.includes(c))return 'D';
+  if(c==='n')return 'N';
+  if(c==='r')return 'R';
+  if(c==='h')return null;         // h muta: tiene il fotogramma
+  return null;                     // spazi/punteggiatura: non cambia
+}
+
+function setPhoneme(ch){
+  const p=phoneme(ch);
+  if(!p)return;
+  stopPoseOnly();
+  showFrame(p);
+}
+function stopPoseOnly(){/* nessun timer pose da fermare */}
+
+// ---- gesto a inizio frase ----
+function gestureBurst(name,ms){
+  if(!META)return;
+  stopTimers(); mode='pose';
+  showFrame(name);
+  setTimeout(()=>{if(mode==='pose'&&speechSynthesis.speaking)talkFrames();},ms);
+}
+function talkFrames(){
+  if(!META)return;
+  mode='talk';
+  const step=()=>{if(!speechSynthesis.speaking)return;
+    // se nessun boundary arriva, cicla fonemi plausibili
+    setPhoneme(fullText[Math.floor(Math.random()*fullText.length)]||'e');};
+  phonTimer=setInterval(step,150);
+}
+
+// ---- karaoke ----
+function buildKaraoke(text){
+  log.innerHTML='';
+  text.split(/(\s+)/).forEach(tok=>{
+    if(/^\s+$/.test(tok)){log.appendChild(document.createTextNode(tok));return;}
+    const s=document.createElement('span'); s.className='word'; s.textContent=tok;
+    log.appendChild(s);
+  });
+}
+function highlightChar(idx){
+  const spans=[...log.querySelectorAll('.word')];
+  let acc=0,cur=null;
+  for(const s of spans){
+    const end=acc+s.textContent.length;
+    if(idx>=acc&&idx<end){cur=s;break;}
+    acc=end;
+  }
+  spans.forEach(s=>s.classList.remove('spoken'));
+  if(cur)cur.classList.add('spoken');
+}
+
+// ---- TTS ----
+function pickVoice(){const vs=speechSynthesis.getVoices();
+  return vs.find(v=>v.lang&&v.lang.toLowerCase().startsWith('it'))||vs[0];}
+function speak(t,gesture){
+  if(!('speechSynthesis' in window)){log.textContent='TTS non supportato.';return;}
+  speechSynthesis.cancel();
+  fullText=t; buildKaraoke(t);
+  const u=new SpeechSynthesisUtterance(t);
+  u.voice=pickVoice(); u.lang='it-IT'; u.rate=1.02;
+  u.onstart=()=>{
+    boundarySeen=false;
+    gestureBurst(gesture||'point',650);
+    // safety: se nessun boundary dopo 900ms → fonemi auto
+    setTimeout(()=>{if(!boundarySeen&&speechSynthesis.speaking)talkFrames();},900);
+  };
+  u.onboundary=(e)=>{
+    if(e.charIndex==null)return;
+    boundarySeen=true;
+    clearTimeout(u._to);
+    setPhoneme(t[e.charIndex]);
+    highlightChar(e.charIndex);
+    // reset a fonema chiuso dopo 180ms di silenzio tra i boundary
+    u._to=setTimeout(()=>{if(speechSynthesis.speaking)setPhoneme('M');},180);
+  };
+  u.onend=()=>{
+    stopTimers(); mode='pose';
+    if(META){showFrame('smile');setTimeout(()=>{if(!speechSynthesis.speaking)startIdle();},800);}
+    else startIdle();
+  };
+  u.onerror=u.onend;
+  speechSynthesis.speaking&&speechSynthesis.cancel();
+  speechSynthesis.speak(u);
+}
+
+// ---- scena (bottoni) ----
+function buildScene(){
+  const mk=(rowId,frames,label)=>{
+    const row=document.getElementById(rowId);
+    frames.forEach(name=>{
+      const b=document.createElement('button');
+      b.className='chip'; b.textContent=label?label(name):name;
+      b.onclick=()=>{stopTimers();mode='pose';showFrame(name);
+        document.querySelectorAll('.chip.on').forEach(x=>x.classList.remove('on'));
+        b.classList.add('on');};
+      row.appendChild(b);
+    });
+  };
+  mk('row-rotation',META.sections.rotation.frames);
+  mk('row-expressions',META.sections.expressions.frames);
+  mk('row-gestures',META.sections.gestures.frames);
+  mk('row-poses',META.sections.poses.frames);
+  document.getElementById('b-idle').onclick=()=>{
+    document.querySelectorAll('.chip.on').forEach(x=>x.classList.remove('on'));startIdle();};
+}
+document.getElementById('b-scene').onclick=()=>document.getElementById('scene').classList.toggle('open');
+
+// ---- dati ----
 async function state(){const r=await fetch('/api/state');return r.json();}
 document.getElementById('b-pred').onclick=async(e)=>{e.target.disabled=true;
-try{const s=await state();const fx=(s.fixtures||[]).slice(0,5);
-if(!fx.length){speak('Non ci sono partite in programma, ripassa più tardi!');return;}
-let t='Ecco i pronostici del bar. ';for(const f of fx){const p=((f.predictions||{})['1x2'])||{};
-const h=Math.round((p['1']||0)*100),d=Math.round((p.x||0)*100),a=Math.round((p['2']||0)*100);
-t+=`${f.home} contro ${f.away}: ${h} per cento uno, ${d} pareggio, ${a} due. `;}speak(t);
-}catch(err){speak('Non riesco a leggere i dati in questo momento.');}e.target.disabled=false;};
+  try{const s=await state();const fx=(s.fixtures||[]).slice(0,5);
+  if(!fx.length){speak('Non ci sono partite in programma, ripassa più tardi!','think');return;}
+  let t='Ecco i pronostici del bar. ';
+  for(const f of fx){const p=((f.predictions||{})['1x2'])||{};
+    const h=Math.round((p['1']||0)*100),d=Math.round((p.x||0)*100),a=Math.round((p['2']||0)*100);
+    t+=`${f.home} contro ${f.away}: ${h} per cento uno, ${d} pareggio, ${a} due. `;}
+  speak(t,'point');
+  }catch(err){speak('Non riesco a leggere i dati in questo momento.','think');}
+  e.target.disabled=false;};
 document.getElementById('b-table').onclick=async(e)=>{e.target.disabled=true;
-try{const s=await state();const st=[...(s.standings||[])].sort((a,b)=>(a.position||99)-(b.position||99)).slice(0,5);
-if(!st.length){speak('Classifica non disponibile.');return;}
-let t='Le prime cinque in classifica. ';st.forEach((r,i)=>{t+=`${i+1}, ${r.name} con ${r.points} punti. `;});speak(t);
-}catch(err){speak('Non riesco a leggere la classifica.');}e.target.disabled=false;};
-document.getElementById('b-stop').onclick=()=>{speechSynthesis.cancel();animate(false);};
+  try{const s=await state();const st=[...(s.standings||[])].sort((a,b)=>(a.position||99)-(b.position||99)).slice(0,5);
+  if(!st.length){speak('Classifica non disponibile.','think');return;}
+  let t='Le prime cinque in classifica. ';
+  st.forEach((r,i)=>{t+=`${i+1}, ${r.name} con ${r.points} punti. `;});
+  speak(t,'trophy_up');
+  }catch(err){speak('Non riesco a leggere la classifica.','think');}
+  e.target.disabled=false;};
+document.getElementById('b-stop').onclick=()=>{
+  speechSynthesis.cancel();stopTimers();startIdle();};
+
+if('speechSynthesis' in window)speechSynthesis.getVoices();
+init();
 </script>
 </body>
 </html>
