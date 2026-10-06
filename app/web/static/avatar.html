@@ -85,6 +85,24 @@ const loadingText = document.getElementById('loading-text');
 let ready = false;
 let curWord = null;
 
+// ---- testa-foto: stato (dichiarato prima di showAvatar che lo usa) ----
+const HIDE_3D_HEAD = ['AvatarHead','AvatarEyelashes','AvatarLeftEyeball','AvatarRightEyeball','AvatarTeethLower','AvatarTeethUpper'];
+const HEAD_BIND_CENTER = { x: 0, y: 1.624, z: 0.03 };  // centro testa in bind pose (dal GLB)
+const HEAD_DIAM = 0.26;                                 // diametro cerchio foto (unità modello)
+const MOUTH_POS = { x: 0.50, y: 0.62 };                 // labbra nella foto (0..1)
+const MOUTH_SKIN = { x: 0.50, y: 0.725 };               // campione pelle del mento (per cancellare le labbra originali)
+const MOUTHS = {
+  'sil': { w:.26, h:.015 }, 'PP': { w:.28, h:.02 }, 'FF': { w:.24, h:.05, teeth:true },
+  'aa':  { w:.40, h:.26 }, 'E':  { w:.42, h:.15 }, 'I':  { w:.42, h:.11 },
+  'O':   { w:.24, h:.22 }, 'U':  { w:.16, h:.15 },
+  'kk':  { w:.30, h:.13 }, 'CH': { w:.28, h:.15 }, 'SS': { w:.34, h:.07, teeth:true },
+  'DD':  { w:.30, h:.09 }, 'nn': { w:.30, h:.11 }, 'RR': { w:.26, h:.13 }
+};
+let face = null;          // { sprite, canvas, ctx, texture, img }
+let hiddenMeshes = [];
+let photoMode = true;
+let timeline = [], speakT0 = 0, mouthRAF = 0, lastViseme = '';
+
 function status(s){ statusEl.textContent = s || ''; }
 function log(s){ logEl.textContent = s; curWord = null; }
 
@@ -147,23 +165,6 @@ function onSubtitle(s){
 }
 
 // ---- testa-foto: la TUA foto montata sul corpo 3D ----
-const HIDE_3D_HEAD = ['AvatarHead','AvatarEyelashes','AvatarLeftEyeball','AvatarRightEyeball','AvatarTeethLower','AvatarTeethUpper'];
-const HEAD_BIND_CENTER = { x: 0, y: 1.624, z: 0.03 };  // centro testa in bind pose (dal GLB)
-const HEAD_DIAM = 0.26;                                 // diametro cerchio foto (unità modello)
-const MOUTH_POS = { x: 0.50, y: 0.62 };                 // labbra nella foto (0..1)
-const MOUTH_SKIN = { x: 0.50, y: 0.725 };               // campione pelle del mento (per cancellare le labbra originali)
-const MOUTHS = {
-  'sil': { w:.26, h:.015 }, 'PP': { w:.28, h:.02 }, 'FF': { w:.24, h:.05, teeth:true },
-  'aa':  { w:.40, h:.26 }, 'E':  { w:.42, h:.15 }, 'I':  { w:.42, h:.11 },
-  'O':   { w:.24, h:.22 }, 'U':  { w:.16, h:.15 },
-  'kk':  { w:.30, h:.13 }, 'CH': { w:.28, h:.15 }, 'SS': { w:.34, h:.07, teeth:true },
-  'DD':  { w:.30, h:.09 }, 'nn': { w:.30, h:.11 }, 'RR': { w:.26, h:.13 }
-};
-let face = null;          // { sprite, canvas, ctx, texture, img }
-let hiddenMeshes = [];
-let photoMode = true;
-let timeline = [], speakT0 = 0, mouthRAF = 0, lastViseme = '';
-
 function drawFace(v){
   if (!face) return;
   const { ctx, img } = face;
@@ -196,9 +197,6 @@ function drawFace(v){
     ctx.fill();
   }
   ctx.restore();
-  // anello tematico
-  ctx.beginPath(); ctx.arc(256, 256, 248, 0, Math.PI * 2);
-  ctx.lineWidth = 8; ctx.strokeStyle = 'rgba(233,69,96,.9)'; ctx.stroke();
   face.texture.needsUpdate = true;
 }
 
