@@ -107,12 +107,18 @@ def _apply_fixes(fixes):
                 continue
             except Exception as e:
                 log.error("fix whitelist fallita: %s → %s", fix, e)
-        # 2. LLM reale: genera fix su misura
+        # 2. LLM reale: genera fix su misura (MAI su file frontend protetti in auto)
+        _PROTECTED = ("app.js", "style.css", "index.html")
         try:
             from app.analysis.codegen import generate_fix
             changes = generate_fix(fix)
             if changes:
                 for ch in changes:
+                    _base = ch["path"].replace("\\", "/").split("/")[-1]
+                    if _base in _PROTECTED and "static" in ch["path"].replace("\\", "/"):
+                        log.warning("codegen: file protetto %s, serve OK manuale", ch["path"])
+                        applied.append({"fix": fix, "result": "file protetto %s: serve OK manuale" % ch["path"], "changed": False})
+                        continue
                     fp = _STATIC.parent.parent / ch["path"]
                     old = fp.read_text(encoding="utf-8") if fp.exists() else ""
                     fp.parent.mkdir(parents=True, exist_ok=True)
@@ -575,6 +581,58 @@ class MuseSparkAgent(threading.Thread):
         if pending and pending.get("status") == "pending":
             log.info("maintenance: proposta %s già in attesa di OK, skip", pending.get("id"))
             return
+        # --- auto-apply: solo se TUTTI E TRE gli agenti sono d'accordo E il fix
+        #     è whitelist (niente LLM su file custom). Altrimenti proposta manuale.
+        #     Se applica e rompe (handler fallisce / manifest JSON invalido),
+        #     ripristina il backup e passa a proposta manuale.
+        mimo_ok = any("[Mimo]" in (i or "") for i in (joint.get("issues") or []))
+        auto_safe = bool(fixed) and all(
+            any(pat in f.strip().lower() for pat in _APPLY_MAP)
+            for f in fixed
+        )
+        if mimo_ok and auto_safe:
+            _backup = {}
+            try:
+                for _bf in ("sw.js", "manifest.json"):
+                    _bp = _STATIC / _bf
+                    if _bp.exists():
+                        _backup[_bf] = _bp.read_text(encoding="utf-8")
+                applied, has_new, modified_files = _apply_fixes(fixed)
+                # valida: manifest deve restare JSON valido
+                _mp = _STATIC / "manifest.json"
+                if _mp.exists():
+                    json.loads(_mp.read_text(encoding="utf-8"))
+                if has_new:
+                    push_ok, push_msg = _git_push(
+                        "fix(auto): " + ", ".join(fixed),
+                        files=modified_files if modified_files else None,
+                    )
+                    _notify_owner("✅ Auto-fix dei 3 agenti applicato: %s\nPush: %s" % (
+                        ", ".join(modified_files) if modified_files else "nessun file",
+                        push_msg,
+                    ))
+                history = state.get("approved_history") or []
+                history.append({"id": proposal_id, "at": int(time.time()),
+                                "issues": joint.get("issues"), "fixes": fixed,
+                                "reason": joint.get("reason"), "status": "auto-applied"})
+                state["approved_history"] = history[-10:]
+                state["pending_fix"] = False
+                state["muse_spark"] = {"at": int(time.time()), "joint": joint,
+                                       "fixed": fixed, "auto_applied": True}
+                state["checks"].append({"by": "muse-spark", "at": int(time.time()),
+                                        "joint": joint, "fixed": fixed,
+                                        "auto_applied": True})
+                _write(state)
+                log.info("maintenance: auto-fix %s applicato (3 agenti d'accordo)", proposal_id)
+                return
+            except Exception as e:
+                log.error("maintenance: auto-fix %s fallito, rollback: %s", proposal_id, e)
+                for _bf, _content in _backup.items():
+                    try:
+                        (_STATIC / _bf).write_text(_content, encoding="utf-8")
+                    except Exception:
+                        pass
+                # cade alla proposta manuale qui sotto
         state["muse_spark"] = {"at": int(time.time()), "joint": joint, "fixed": fixed}
         state["checks"].append({"by": "muse-spark", "at": int(time.time()), "joint": joint, "fixed": fixed})
         if not fixed:
