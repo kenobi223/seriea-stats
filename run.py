@@ -110,8 +110,9 @@ def main():
     else:
         bot = None
 
-    # Triple-AI maintenance: Big Pickle 5' + Muse Spark 8' + Mimo QA (solo se non --once)
-    if not args.once and not args.no_scheduler:
+    # Agenti CONGELATI su richiesta owner (2026-10-06): non partono a meno che
+    # AGENTS_ENABLED=1 sia impostato esplicitamente.
+    if os.environ.get("AGENTS_ENABLED") == "1" and not args.once and not args.no_scheduler:
         try:
             from app.maintenance import BigPickleAgent, MuseSparkAgent
             BigPickleAgent(store).start()
@@ -119,6 +120,8 @@ def main():
             print("  Manutenzione triple-AI: Big Pickle 5' + Muse Spark 8' + Mimo QA attivi (auto-apply, niente OK)")
         except Exception as e:
             logging.getLogger("maintenance").warning("dual-AI non avviato: %s", e)
+    else:
+        print("  Agenti congelati (AGENTS_ENABLED!=1): nessun auto-fix")
 
     tunnel = Tunnel(args.port, config.DATA_DIR)
 
