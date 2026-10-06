@@ -150,7 +150,8 @@ function onSubtitle(s){
 const HIDE_3D_HEAD = ['AvatarHead','AvatarEyelashes','AvatarLeftEyeball','AvatarRightEyeball','AvatarTeethLower','AvatarTeethUpper'];
 const HEAD_BIND_CENTER = { x: 0, y: 1.624, z: 0.03 };  // centro testa in bind pose (dal GLB)
 const HEAD_DIAM = 0.26;                                 // diametro cerchio foto (unità modello)
-const MOUTH_POS = { x: 0.5, y: 0.67 };                  // posizione bocca nella foto (0..1)
+const MOUTH_POS = { x: 0.50, y: 0.62 };                 // labbra nella foto (0..1)
+const MOUTH_SKIN = { x: 0.50, y: 0.725 };               // campione pelle del mento (per cancellare le labbra originali)
 const MOUTHS = {
   'sil': { w:.26, h:.015 }, 'PP': { w:.28, h:.02 }, 'FF': { w:.24, h:.05, teeth:true },
   'aa':  { w:.40, h:.26 }, 'E':  { w:.42, h:.15 }, 'I':  { w:.42, h:.11 },
@@ -172,9 +173,20 @@ function drawFace(v){
   const s = Math.max(512 / img.width, 512 / img.height);
   const w = img.width * s, h = img.height * s;
   ctx.drawImage(img, (512 - w) / 2, (512 - h) / 2, w, h);
+  const mx = MOUTH_POS.x * 512, my = MOUTH_POS.y * 512;
+  // cancella le labbra originali: patch di pelle campionata dal mento, sfumata
+  const sd = ctx.getImageData(Math.round(MOUTH_SKIN.x * 512), Math.round(MOUTH_SKIN.y * 512), 1, 1).data;
+  ctx.save();
+  ctx.translate(mx, my); ctx.scale(95, 42);
+  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  grad.addColorStop(0, `rgba(${sd[0]},${sd[1]},${sd[2]},0.98)`);
+  grad.addColorStop(0.7, `rgba(${sd[0]},${sd[1]},${sd[2]},0.9)`);
+  grad.addColorStop(1, `rgba(${sd[0]},${sd[1]},${sd[2]},0)`);
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.arc(0, 0, 1, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
   // bocca animata
   const m = MOUTHS[v] || { w:.26, h:.015 };
-  const mx = MOUTH_POS.x * 512, my = MOUTH_POS.y * 512;
   ctx.fillStyle = '#5e1b1b'; ctx.strokeStyle = 'rgba(50,8,8,.85)'; ctx.lineWidth = 4;
   ctx.beginPath(); ctx.ellipse(mx, my, m.w * 256, Math.max(0.012, m.h) * 256, 0, 0, Math.PI * 2);
   ctx.fill(); ctx.stroke();
@@ -192,7 +204,7 @@ function drawFace(v){
 
 async function installPhotoHead(){
   const img = new Image();
-  img.src = '/myavatar.jpg';
+  img.src = '/myavatar.png';
   await img.decode();
   const bone = head.armature.getObjectByName('Head');
   if (!bone) throw new Error('osso Head non trovato');
@@ -387,7 +399,7 @@ document.getElementById('b-stop').onclick = () => {
 };
 
 document.getElementById('b-head').onclick = () => {
-  if (!face){ status('Testa-foto non disponibile (myavatar.jpg)'); return; }
+  if (!face){ status('Testa-foto non disponibile (myavatar.png)'); return; }
   setHeadMode(!photoMode);
 };
 </script>
