@@ -537,7 +537,7 @@ function updateRoundsDropdown() {
 
 async function loadData() {
   try {
-    const res = await fetch("/api/data");
+    const res = await fetch("/api/state");
     if (!res.ok) throw new Error("Network response was not ok");
     state.data = await res.json();
     renderHeader();
