@@ -18,57 +18,63 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header>
-    <img src="/logo.jpg" onerror="this.onerror=null;this.src='/logo.svg'" alt="Serie A Stats logo" width="42" height="42" style="border-radius:50%; flex-shrink:0; object-fit:cover; border:2px solid rgba(255,255,255,.15); box-shadow:0 4px 16px rgba(0,0,0,.3);">
+  <header id="site-header">
+    <img class="logo" src="/logo.jpg" onerror="this.onerror=null;this.src='/logo.svg'" alt="Serie A Stats logo" width="42" height="42">
     <h1>Serie A Stats</h1>
     <span class="sub">classifica · forma · quote · pronostici</span>
-    <a id="tg-link" href="/telegram" target="_blank" rel="noopener" style="margin-left:8px; display:inline-flex; align-items:center; gap:6px; background: linear-gradient(135deg,#2AABEE,#229ED9); color:#fff; padding:6px 14px; border-radius:999px; font-size:12px; font-weight:700; text-decoration:none; box-shadow:0 4px 12px rgba(42,171,238,.3); transition: transform .15s;">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75l-2.2-1.63c-.6-.44-.21-.68.13-1.08l.49-.51 3.56-3.26c.15-.14-.36-.1-.59.06l-4.4 2.77-1.95-.65c-.21-.06-.22-.2-.04-.3l7.63-3c.18-.06.34-.03.48.18l.01.01z"/></svg>
+    <a id="tg-link" class="tg-btn" href="/telegram" target="_blank" rel="noopener">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="white" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75l-2.2-1.63c-.6-.44-.21-.68.13-1.08l.49-.51 3.56-3.26c.15-.14-.36-.1-.59.06l-4.4 2.77-1.95-.65c-.21-.06-.22-.2-.04-.3l7.63-3c.18-.06.34-.03.48.18l.01.01z"/></svg>
       Telegram
     </a>
     <div class="status">
-      <span class="live-dot"></span>
+      <span class="live-dot" aria-hidden="true"></span>
       <span id="last-updated">—</span>
       <span id="cycle-status" class="muted"></span>
     </div>
   </header>
 
-  <nav id="tabs">
-    <button class="active" data-tab="matches">Partite</button>
-    <button data-tab="results">Live & Risultati</button>
-    <button data-tab="standings">Classifica</button>
-    <button data-tab="teams">Squadre</button>
-    <button data-tab="ai">AI Insights</button>
-    <button data-tab="schedina">Schedina</button>
-    <button data-tab="tracking">Onestà</button>
+  <nav id="tabs" role="tablist" aria-label="Sezioni">
+    <button id="tab-btn-matches" role="tab" aria-selected="true" aria-controls="tab-matches" class="active" data-tab="matches">Partite</button>
+    <button id="tab-btn-results" role="tab" aria-selected="false" aria-controls="tab-results" data-tab="results">Live &amp; Risultati</button>
+    <button id="tab-btn-standings" role="tab" aria-selected="false" aria-controls="tab-standings" data-tab="standings">Classifica</button>
+    <button id="tab-btn-teams" role="tab" aria-selected="false" aria-controls="tab-teams" data-tab="teams">Squadre</button>
+    <button id="tab-btn-ai" role="tab" aria-selected="false" aria-controls="tab-ai" data-tab="ai">AI Insights</button>
+    <button id="tab-btn-schedina" role="tab" aria-selected="false" aria-controls="tab-schedina" data-tab="schedina">Schedina</button>
+    <button id="tab-btn-tracking" role="tab" aria-selected="false" aria-controls="tab-tracking" data-tab="tracking">Onestà</button>
   </nav>
 
-  <div id="controls" style="max-width:1220px; margin:14px auto 0; padding:0 20px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-    <div style="position:relative; flex:1; min-width:220px;">
-      <input id="search" placeholder="🔍 Cerca squadra o partita..." style="width:100%; padding:10px 14px 10px 36px;">
-      <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); opacity:.5;">⌕</span>
+  <div id="controls">
+    <div class="search-wrap">
+      <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="search" type="search" aria-label="Cerca squadra o partita" placeholder="Cerca squadra o partita…">
     </div>
-    <select id="filter-round" style="min-width:140px;"><option value="">Tutte le giornate</option></select>
-    <button id="fav-toggle" class="ghost" title="Mostra solo preferiti">⭐ Preferiti</button>
-    <button id="sort-toggle" class="ghost" title="Ordina">⇅ Ordina</button>
+    <select id="filter-round" aria-label="Filtra per giornata"><option value="">Tutte le giornate</option></select>
+    <button id="fav-toggle" class="ghost" aria-pressed="false" title="Mostra solo le partite delle squadre preferite">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.6l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.4l-5.8 3.1 1.1-6.5L2.6 9.4l6.5-.9z"/></svg>
+      Preferiti
+    </button>
+    <button id="sort-toggle" class="ghost" title="Cambia ordinamento">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M7 4v14M7 18l-3-3M7 18l3-3M17 20V6M17 6l-3 3M17 6l3 3"/></svg>
+      <span id="sort-label">Ordina: ora</span>
+    </button>
   </div>
 
   <main>
-    <section class="tab active" id="tab-matches"></section>
-    <section class="tab" id="tab-results"></section>
-    <section class="tab" id="tab-standings"></section>
-    <section class="tab" id="tab-teams"></section>
-    <section class="tab" id="tab-ai"></section>
-    <section class="tab" id="tab-schedina"></section>
-    <section class="tab" id="tab-tracking"></section>
+    <section class="tab active" id="tab-matches" role="tabpanel" aria-labelledby="tab-btn-matches"></section>
+    <section class="tab" id="tab-results" role="tabpanel" aria-labelledby="tab-btn-results"></section>
+    <section class="tab" id="tab-standings" role="tabpanel" aria-labelledby="tab-btn-standings"></section>
+    <section class="tab" id="tab-teams" role="tabpanel" aria-labelledby="tab-btn-teams"></section>
+    <section class="tab" id="tab-ai" role="tabpanel" aria-labelledby="tab-btn-ai"></section>
+    <section class="tab" id="tab-schedina" role="tabpanel" aria-labelledby="tab-btn-schedina"></section>
+    <section class="tab" id="tab-tracking" role="tabpanel" aria-labelledby="tab-btn-tracking"></section>
   </main>
 
   <footer>
     <div id="tunnel-box" class="muted">Link pubblico: —</div>
-    <div style="margin-top:10px;">
-      <a href="/telegram" target="_blank" rel="noopener" style="display:inline-flex; align-items:center; gap:6px; background:#2AABEE; color:#fff; padding:8px 16px; border-radius:999px; font-size:12px; font-weight:700; text-decoration:none;">Apri su Telegram <span style="opacity:.9;">↗</span></a>
+    <div class="footer-actions">
+      <a class="tg-btn" href="/telegram" target="_blank" rel="noopener">Apri su Telegram <span aria-hidden="true">↗</span></a>
     </div>
-    <div class="muted" style="margin-top:8px; font-size:11px;">Serie A Stats · modello Poisson Dixon-Coles · dati ESPN/Sofascore</div>
+    <div class="credit muted">Serie A Stats · modello Poisson Dixon-Coles · dati ESPN/Sofascore</div>
   </footer>
 
   <script src="/app.js"></script>
