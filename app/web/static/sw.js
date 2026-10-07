@@ -1,8 +1,8 @@
-﻿/* seriea-v7 1791400002 */
+﻿/* seriea-v8 1791400003 */
 self.addEventListener('install',e=>self.skipWaiting());
 self.addEventListener('activate',e=>{
   e.waitUntil(caches.keys().then(ks=>Promise.all(
-    ks.filter(k=>k.startsWith('seriea-')&&k!=='seriea-v7').map(k=>caches.delete(k))
+    ks.filter(k=>k.startsWith('seriea-')&&k!=='seriea-v8').map(k=>caches.delete(k))
   )).then(()=>self.clients.claim()));
 });
 self.addEventListener('fetch',e=>{
@@ -11,7 +11,7 @@ self.addEventListener('fetch',e=>{
     const u=new URL(e.request.url);
     if(u.origin===location.origin&&u.pathname.startsWith('/api/'))return;
   }catch(err){}
-  e.respondWith(caches.open('seriea-v7').then(c=>
+  e.respondWith(caches.open('seriea-v8').then(c=>
     c.match(e.request).then(r=>r||fetch(e.request).then(res=>{
       if(res.ok)c.put(e.request,res.clone());return res;
     }).catch(()=>c.match(e.request)))));

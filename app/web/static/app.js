@@ -144,22 +144,6 @@ function moraleBlock(fx, side) {
     ${notes ? `<div class="coach-note muted">Mister: ${notes}</div>` : ""}`;
 }
 
-function postMorale(home, away, sideHome) {
-  const mine = sideHome ? home : away;
-  const theirs = sideHome ? away : home;
-  let delta = mine > theirs ? 2 : (mine === theirs ? 0 : -2);
-  const diff = mine - theirs;
-  if (diff >= 3) delta += 1; else if (diff <= -3) delta -= 1;
-  if (mine >= 3) delta += 0.5;
-  if (theirs === 0) delta += 0.5;
-  delta = Math.max(-3, Math.min(3, delta));
-  if (delta >= 2) return "▲ vola";
-  if (delta > 0) return "▲ su";
-  if (delta === 0) return "· stabile";
-  if (delta > -2) return "▼ giù";
-  return "▼ crisi";
-}
-
 function formBlock(fx, side) {
   const form = (side === "home" ? fx.form_home : fx.form_away) || {};
   const lasts = form.last_results || [];
@@ -185,8 +169,8 @@ function predictionBlock(fx) {
     const p1 = (prob["1"] * 100) || 0, px = (prob["x"] * 100) || 0, p2 = (prob["2"] * 100) || 0;
     html += `<div class="prob-bar" title="Clicca su «1» per condividere">
       <div style="width:${p1}%;background:var(--accent); cursor:pointer;" onclick="shareText('Pronostico ${esc(fx.home)}-${esc(fx.away)}: 1 ${p1.toFixed(0)}% X ${px.toFixed(0)}% 2 ${p2.toFixed(0)}%')" title="Condividi">${p1.toFixed(0)}%</div>
-      <div style="width:${px}%;background:#6e7681">${px.toFixed(0)}%</div>
-      <div style="width:${p2}%;background:var(--alert)">${p2.toFixed(0)}%</div>
+      <div style="width:${px}%;background:var(--prob-x)">${px.toFixed(0)}%</div>
+      <div style="width:${p2}%;background:var(--prob-2)">${p2.toFixed(0)}%</div>
     </div>
     <div class="prob-line">
       <span>1: <b>${p1.toFixed(1)}%</b></span>
@@ -265,7 +249,7 @@ function renderMatches() {
           <div class="teams">
             ${favBtn(fx.home)}
             <span>${esc(fx.home)}</span>
-            <span class="vs">${scoreStr}</span>
+            <span class="vs${scoreStr === "vs" ? "" : " score"}">${scoreStr}</span>
             <span>${esc(fx.away)}</span>
             ${favBtn(fx.away)}
           </div>
@@ -568,8 +552,8 @@ function renderTracking() {
         </div>
       </div>`;
     }
-    html += `</div><div class="muted tight">Barra <span style="color:var(--accent)">blu</span> = probabilità dichiarata,
-      barra <span style="color:var(--alert)">rossa</span> = centratura reale. Se la rossa è più corta della blu, ero troppo ottimista.</div></div>`;
+    html += `</div><div class="muted tight">Barra <span style="color:var(--accent)">verde</span> = probabilità dichiarata,
+      barra <span style="color:var(--alert)">rossa</span> = centratura reale. Se la rossa è più corta della verde, ero troppo ottimista.</div></div>`;
   }
 
   // correttori appresi

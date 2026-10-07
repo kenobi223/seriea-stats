@@ -1,25 +1,13 @@
-{
-  "name": "SerieA Stats",
+﻿{
+  "name": "Serie A Stats",
   "short_name": "SerieA",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#1a1a2e",
-  "theme_color": "#e94560",
+  "background_color": "#070a14",
+  "theme_color": "#070a14",
   "icons": [
-    {
-      "src": "/logo.jpg",
-      "sizes": "any",
-      "type": "image/jpeg"
-    },
-    {
-      "src": "/static/logo.svg",
-      "sizes": "any",
-      "type": "image/svg+xml"
-    },
-    {
-      "src": "/static/favicon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml"
-    }
+    { "src": "/logo.jpg", "sizes": "any", "type": "image/jpeg" },
+    { "src": "/logo.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
   ]
 }
