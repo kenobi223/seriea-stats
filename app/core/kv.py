@@ -34,6 +34,8 @@ KEYS = {
     "tg_offset.json": os.path.join(config.DATA_DIR, "tg_offset.json"),
     "coaches.json": config.COACHES_FILE,
     "maintenance.json": os.path.join(config.DATA_DIR, "maintenance.json"),
+    "digest_sent.json": os.path.join(config.DATA_DIR, "digest_sent.json"),
+    "donors.json": os.path.join(config.DATA_DIR, "donors.json"),
 }
 
 

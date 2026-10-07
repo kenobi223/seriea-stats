@@ -297,6 +297,14 @@ def run_cycle(store):
     except Exception as e:
         log.debug("notifica pronostici indovinati fallita: %s", e)
 
+    # ---- digest automatici Telegram: riepilogo della giornata al mattino
+    #      e promemoria/recap delle squadre seguite la sera prima
+    try:
+        from app import bot_digest
+        bot_digest.send_all(store)
+    except Exception as e:
+        log.debug("digest automatici falliti: %s", e)
+
     try:
         tracking, calibration = tracker.analyze()
     except Exception as e:

@@ -4,6 +4,8 @@ italiano, classifica, risultati, live e pronostici gratis per tutti.
 Imposta:
   - menu a bottoni (inline keyboard): /start o /menu lo apre, ogni funzionalità
     è raggiungibile senza digitare comandi
+  - messaggi in HTML (parse_mode="HTML"): grassetti, tabelle monospace e
+    barre di probabilità; fallback automatico a testo puro se il parse fallisce
   - donazioni in ⭐ Telegram Stars (sendInvoice con currency XTR), tutti i
     contenuti sono gratis (niente abbonamenti, lingua solo italiana)
 
@@ -28,6 +30,10 @@ log = logging.getLogger("telegram")
 API = "https://api.telegram.org/bot{token}/{method}"
 MAX_MSG = 4096
 
+# tipi di update gestiti: dichiarati esplicitamente così nessuna impostazione
+# pregressa (webhook/vecchio getUpdates) può escludere i messaggi di pagamento
+ALLOWED_UPDATES = ["message", "callback_query", "pre_checkout_query"]
+
 INTENTS = {"pronostici": "pronostici"}
 MARKET_KEY = {"1x2": "market_1x2", "over_under": "market_over_under",
               "btts": "market_btts"}
@@ -39,6 +45,19 @@ def _market_label(tr, market):
 
 
 # ------------------------------------------------------------------- utils
+def _h(s):
+    """Escape HTML per i valori dinamici inseriti nei testi del bot."""
+    return (str(s if s is not None else "")
+            .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def _bar(p):
+    """Barra di probabilità a 10 celle (█/░) per i messaggi monospace."""
+    p = max(0.0, min(1.0, float(p or 0)))
+    n = 10
+    full = int(round(p * n))
+    return "█" * full + "░" * (n - full)
+
 def _norm(s):
     return unicodedata.normalize("NFKD", s or "").encode("ascii",
                                                          "ignore").decode().lower()
@@ -67,17 +86,17 @@ def _clean(s):
 
 
 def _render(result):
-    """Trasforma la risposta strutturata dell'assistente (testo)."""
+    """Trasforma la risposta strutturata dell'assistente (testo HTML-safe)."""
     parts = []
     intro = str(result.get("intro") or "")
     if intro:
-        parts.append(_clean(intro))
+        parts.append(_h(_clean(intro)))
     for l in result.get("lines") or []:
         if str(l).strip():
-            parts.append(_clean(str(l)))
+            parts.append(_h(_clean(str(l))))
     for it in result.get("items") or []:
-        title = _clean(str(it.get("title") or ""))
-        text = _clean(str(it.get("text") or ""))
+        title = _h(_clean(str(it.get("title") or "")))
+        text = _h(_clean(str(it.get("text") or "")))
         parts.append(f"• {title}\n  {text}" if text else f"• {title}")
     body = "\n\n".join(parts).strip()
     return body or "Nessun dato disponibile."
@@ -107,48 +126,63 @@ def _classifica_text(tr, standings):
     if not standings:
         return tr._t("classifica_nodata")
     rows = sorted(standings, key=lambda x: (x.get("position") or 99))[:20]
-    lines = [tr._t("classifica_title"), ""]
+    lines = [tr._t("classifica_title"), "", "<pre>"]
     for r in rows:
-        lines.append(
-            tr._t("classifica_row",
-                  pos=r.get("position"), name=r.get("name"),
-                  points=r.get("points", 0), played=r.get("played", 0),
-                  gf=r.get("gf", 0), ga=r.get("ga", 0)))
+        pos = r.get("position") or 0
+        name = _h(str(r.get("name") or ""))[:16]
+        lines.append(f"{pos:>2}. {name:<16} {int(r.get('points') or 0):>3}pt  "
+                     f"{int(r.get('played') or 0):>2}g  "
+                     f"{int(r.get('gf') or 0):>3}-{int(r.get('ga') or 0):<3}")
+    lines.append("</pre>")
     return "\n".join(lines)
 
 
 def _giornata_text(tr, fixtures):
     if not fixtures:
         return tr._t("partite_nodata")
+    from app.core import markets as mk
     lines = [tr._t("partite_title", r=fixtures[0].get("round")), ""]
     for fx in fixtures[:10]:
         p = fx.get("predictions") or {}
         probs = p.get("1x2") or {}
-        line = f"{fx.get('home')} - {fx.get('away')}"
+        when = (time.strftime("%d/%m %H:%M",
+                               time.localtime(fx.get("start_ts") or 0))
+                if fx.get("start_ts") else "")
+        lines.append(f"🕐 {when}  <b>{_h(fx.get('home'))} - "
+                     f"{_h(fx.get('away'))}</b>")
         if probs:
-            line += (f"  ·  1X2: {probs.get('1', 0) * 100:.0f}%/"
-                     f"{probs.get('x', 0) * 100:.0f}%/{probs.get('2', 0) * 100:.0f}%")
+            lines.append(f"   1X2  <b>{probs.get('1', 0) * 100:.0f}%</b> / "
+                         f"{probs.get('x', 0) * 100:.0f}% / "
+                         f"{probs.get('2', 0) * 100:.0f}%")
         mp = (p.get("model_picks") or {}).get("1x2")
         if mp:
-            odds = f", quota {mp['odds']:.2f}" if mp.get("odds") else ""
-            line += (f"\n   🎯 {tr._t('pronostico_pick', pick=mp['pick'].upper(), pct=mp['prob'] * 100)}"
-                     f"{odds}")
+            odds = f" · quota {mp['odds']:.2f}" if mp.get("odds") else ""
+            key = mp.get("key") or mp.get("pick") or "?"
+            label = mk.label("1x2", key)
+            if str(key).lower() in ("1", "x", "2"):
+                label = label.upper()
+            lines.append(f"   🎯 <b>{_h(label)}</b> "
+                         f"{_bar(mp.get('prob') or 0)} "
+                         f"{(mp.get('prob') or 0) * 100:.0f}%{odds}")
         es = (p.get("exact_score") or [])
         if es:
-            line += (f"\n   {tr._t('pronostico_exact', score=es[0]['score'], pct=es[0]['prob'] * 100)}")
+            lines.append("   " + tr._t("pronostico_exact",
+                                       score=es[0]["score"],
+                                       pct=es[0]["prob"] * 100))
         tp = p.get("tipster_mix")
         if tp:
             rate = f"{tp['rate'] * 100:.0f}%" if tp.get("rate") is not None else "n/d"
-            src = tp.get("source") or "?"
-            o = tp.get("outcome") or "?"
-            g = tp.get("goals") or "?"
-            s = tp.get("score") or "?"
-            line += f"\n   {tr._t('pronostico_tipster', src=src, rate=rate, o=o, g=g, s=s)}"
+            lines.append("   " + _h(tr._t(
+                "pronostico_tipster", src=tp.get("source") or "?",
+                rate=rate, o=tp.get("outcome") or "?",
+                g=tp.get("goals") or "?", s=tp.get("score") or "?")))
         best = (p or {}).get("best_bets") or []
         if best:
             b = best[0]
-            line += f"\n   • {b.get('pick')} @ {b.get('odds')} ({b.get('prob', 0) * 100:.0f}%)"
-        lines.append(line)
+            edge = (f" · +{(b.get('edge') or 0) * 100:.0f}%"
+                    if b.get("edge") else "")
+            lines.append(f"   💰 <b>{_h(b.get('pick'))}</b> @ {b.get('odds')} "
+                         f"({(b.get('prob') or 0) * 100:.0f}%){edge}")
         lines.append("")
     return "\n".join(lines).rstrip()
 
@@ -161,14 +195,15 @@ def _risultati_text(tr, results):
     for rnd in results:
         lines.append(tr._t("giornata", r=rnd["round"]))
         for m in rnd["matches"]:
-            base = f"  {m['home']} {m['score']} {m['away']}"
+            base = f"  <b>{_h(m['home'])} {_h(m['score'])} {_h(m['away'])}</b>"
             sc = str(m.get("score") or "").split("-")
             if len(sc) == 2:
                 try:
                     h, a = int(sc[0].strip()), int(sc[1].strip())
                     d1 = morale_mod.post_morale(h, a, True)[1]
                     d2 = morale_mod.post_morale(h, a, False)[1]
-                    base += f"\n      {m['home']}: {d1} · {m['away']}: {d2}"
+                    base += (f"\n      {_h(m['home'])}: {d1} · "
+                             f"{_h(m['away'])}: {d2}")
                 except ValueError:
                     pass
             lines.append(base)
@@ -180,11 +215,13 @@ def _live_text(tr, live):
     matches = live.get("matches") or []
     if not matches:
         return tr._t("live_nodata")
-    lines = [tr._t("live_title"), ""]
+    lines = [tr._t("live_title"), "", "<pre>"]
     for m in matches:
         minute = f" · {m['minute']}'" if m.get("minute") is not None else ""
-        lines.append(f"{m['home']} {m.get('hs', '-')}-{m.get('as', '-')} "
-                     f"{m['away']}{minute}")
+        home = _h(str(m.get("home") or ""))[:18]
+        lines.append(f"{home:<18} {m.get('hs', '-')}-{m.get('as', '-')}  "
+                     f"{_h(m.get('away'))}{minute}")
+    lines.append("</pre>")
     return "\n".join(lines)
 
 
@@ -197,15 +234,15 @@ def _morale_text(tr, fixtures):
         h, a = mo.get("home") or {}, mo.get("away") or {}
         if not h and not a:
             continue
-        lines.append(f"{fx.get('home')} - {fx.get('away')}")
+        lines.append(f"<b>{_h(fx.get('home'))} - {_h(fx.get('away'))}</b>")
         for name, m in ((fx.get("home"), h), (fx.get("away"), a)):
             note = (m.get("notes") or [])[:1]
-            quote = ("   💬 " + note[0]["title"]) if note else ""
-            lines.append(f"  {name}: {m.get('label', '?')} "
-                         f"{m.get('score', '?')}/10"
-                         f"{' · assenti ' + str(m['injuries']) if m.get('injuries') else ''}")
+            quote = ("   💬 " + _h(note[0]["title"])) if note else ""
+            inj = (f" · assenti {m['injuries']}" if m.get("injuries") else "")
+            lines.append(f"  {_h(name)}: <b>{_h(m.get('label', '?'))}</b> "
+                         f"{m.get('score', '?')}/10{_h(inj)}")
             if m.get("coach_note"):
-                lines.append("   🔁 " + m["coach_note"])
+                lines.append("   🔁 " + _h(m["coach_note"]))
             if quote:
                 lines.append(quote)
         lines.append("")
@@ -261,7 +298,7 @@ def _tracking_text(tr, tracking):
     lessons = tracking.get("conclusions") or []
     if lessons:
         lines.append(tr._t("tracking_learned"))
-        lines += lessons[:6]
+        lines += [_h(l) for l in lessons[:6]]
     return "\n".join(lines)
 
 
@@ -283,8 +320,8 @@ def _schedina_text(tr, slip):
         odds = p.get("odds") or 0
         pct = (p.get("prob") or 0) * 100
         score = p.get("score") or ""
-        lines.append(tr._t("schedina_match", home=p.get("home"),
-                           away=p.get("away")))
+        lines.append(tr._t("schedina_match", home=_h(p.get("home")),
+                           away=_h(p.get("away"))))
         if p.get("result") == "win":
             lines.append("   " + tr._t("schedina_win", pick=pick, odds=odds,
                                        pct=pct, score=score))
@@ -318,30 +355,35 @@ def _kb(rows):
         [btn(t, d) for t, d in row] for row in rows]}
 
 
-def _menu_kb(tr):
+def _menu_kb(tr, section=None):
+    """Menu principale. Con section mostra 🔄 Aggiorna + 🏠 Menu in coda."""
     rows = [
         [(tr._t("menu_classifica"), "p:classifica"),
          (tr._t("menu_partite"), "p:partite")],
         [(tr._t("menu_risultati"), "p:risultati"),
          (tr._t("menu_live"), "p:live")],
-        [(tr._t("menu_pronostici"), "p:pronostici"),
-         (tr._t("menu_morale"), "p:morale"),
+        [(tr._t("menu_presagi"), "p:presagi"),
+         (tr._t("menu_pronostici"), "p:pronostici")],
+        [(tr._t("menu_schedina"), "p:schedina"),
          (tr._t("menu_tracking"), "p:tracking")],
-         [(tr._t("menu_schedina"), "p:schedina")],
+        [(tr._t("menu_morale"), "p:morale")],
         [(tr._t("menu_segui"), "flw"),
          (tr._t("menu_stopsegui"), "unf")],
     ]
+    if section:
+        rows.append([(tr._t("section_refresh"), f"p:{section}"),
+                     (tr._t("menu_menu"), "m")])
+        return _kb(rows)
     if config.PUBLIC_URL:
         rows.append([(tr._t("menu_sito"), config.PUBLIC_URL)])
-    rows.append([(tr._t("menu_donazioni"), "don"),
-                 (tr._t("menu_menu"), "m")])
+    rows.append([(tr._t("menu_donazioni"), "don")])
     return _kb(rows)
 
 
 def _don_kb(tr):
     rows = [DONATION_OPTIONS[i:i + 3] for i in range(0, len(DONATION_OPTIONS), 3)]
     buttons = [[("⭐ " + str(s), f"don:{s}") for s in row] for row in rows]
-    return _kb(buttons + [[(tr._t("back"), "m")]])
+    return _kb(buttons + [[(tr._t("menu_menu"), "m")]])
 
 
 def _teams_kb(store, tr, prefix, teams=None):
@@ -369,6 +411,7 @@ class TelegramBot:
         self.username = None
         self._offset = 0
         self._running = False
+        self._last_err = ""
         off = kv.read_json("tg_offset.json")
         if isinstance(off, dict) and isinstance(off.get("offset"), int):
             self._offset = off["offset"]
@@ -377,11 +420,13 @@ class TelegramBot:
     # -------------------------------------------------------------- api
     def _call(self, method, payload, timeout=25):
         url = API.format(token=self.token, method=method)
+        self._last_err = ""
         try:
             r = requests.post(url, json=payload, timeout=timeout)
             data = r.json()
             if not data.get("ok"):
                 desc = str(data.get("description") or "")
+                self._last_err = desc
                 log.warning("Telegram %s: %s", method, desc)
                 # backoff su flood control di Telegram
                 if "Too Many" in desc or "retry after" in desc.lower():
@@ -393,17 +438,25 @@ class TelegramBot:
                 return None
             return data.get("result")
         except Exception as e:
+            self._last_err = str(e)
             log.warning("Telegram %s: %s", method, e)
             return None
 
     def _send(self, chat_id, text, reply_markup=None):
+        """Invia in HTML; se Telegram non riesce a fare il parse, riprova puro."""
         for i, chunk in enumerate(_split_long(text)):
             payload = {"chat_id": chat_id, "text": chunk,
+                       "parse_mode": "HTML",
                        "disable_web_page_preview": True}
             if i == 0 and reply_markup is not None:
                 payload["reply_markup"] = reply_markup
-            if self._call("sendMessage", payload) is None:
-                return
+            res = self._call("sendMessage", payload)
+            if res is None and "parse" in (self._last_err or ""):
+                payload.pop("parse_mode", None)
+                res = self._call("sendMessage", payload)
+            if res is None:
+                return False
+        return True
 
     def _send_menu(self, chat_id, text=None):
         tr = Tr(chat_id)
@@ -413,18 +466,30 @@ class TelegramBot:
         self._send(chat_id, body, _menu_kb(tr))
 
     def _edit(self, chat_id, message_id, text, reply_markup=None):
-        payload = {"chat_id": chat_id, "message_id": message_id, "text": text}
+        payload = {"chat_id": chat_id, "message_id": message_id, "text": text,
+                   "parse_mode": "HTML"}
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
-        return self._call("editMessageText", payload)
+        res = self._call("editMessageText", payload)
+        if res is None:
+            err = self._last_err or ""
+            if "not modified" in err:      # stesso contenuto: è un successo
+                return True
+            if "parse" in err:             # fallback senza HTML
+                payload.pop("parse_mode", None)
+                res = self._call("editMessageText", payload)
+        return res
 
     def _edit_or_send(self, chat_id, message_id, text, reply_markup=None):
         if message_id and self._edit(chat_id, message_id, text, reply_markup):
             return
         self._send(chat_id, text, reply_markup)
 
-    def _answer_cb(self, callback_id):
-        self._call("answerCallbackQuery", {"callback_query_id": callback_id})
+    def _answer_cb(self, callback_id, toast=None):
+        payload = {"callback_query_id": callback_id}
+        if toast:
+            payload["text"] = toast
+        self._call("answerCallbackQuery", payload)
 
     # ------------------------------------------------------- autorizza
     def _authorized(self, chat_id):
@@ -448,6 +513,9 @@ class TelegramBot:
             return _tracking_text(tr, self.store.get("tracking", {}))
         if section == "schedina":
             return _schedina_text(tr, self.store.get("schedina") or {})
+        if section == "presagi":
+            from app import bot_digest
+            return bot_digest.presagi_text(self.store)
         if section in INTENTS:
             result = answer(INTENTS[section], self.store.get("fixtures", []))
             return _render(result)
@@ -456,7 +524,7 @@ class TelegramBot:
     def _open_section(self, chat_id, message_id, section):
         tr = Tr(chat_id)
         text = self._section_text(tr, section)
-        kb = _menu_kb(tr)
+        kb = _menu_kb(tr, section=section)
         if section in ("pronostici",):
             note = _pronostici_note(tr, self.store.get("tracking", {}))
             if note and "\n\n" not in text:
@@ -466,7 +534,8 @@ class TelegramBot:
 
     # ------------------------------------------------- callback data
     def _on_callback(self, chat_id, callback_id, message_id, data):
-        self._answer_cb(callback_id)
+        toast = "⭐ Invio la fattura…" if data.startswith("don:") else None
+        self._answer_cb(callback_id, toast)
         # maint approval: solo capo può approvare
         if data.startswith("maint_ok:") or data.startswith("maint_no:"):
             if chat_id not in config.TELEGRAM_OWNER_IDS:
@@ -512,8 +581,8 @@ class TelegramBot:
                     stars = int(data[4:])
                 except ValueError:
                     stars = 50
-                self._edit_or_send(chat_id, message_id,
-                                   tr._t("menu_title"), _menu_kb(tr))
+                # la schermata resta aperta (l'utente può scegliere altro
+                # importo); la fattura arriva come nuovo messaggio
                 self._send_invoice(chat_id, stars)
         except Exception as e:
             log.error("Telegram: callback %s fallita: %s", data, e)
@@ -527,7 +596,7 @@ class TelegramBot:
         add_follow(chat_id, [canon])
         cur = ", ".join(_load_follows().get(str(chat_id), []))
         self._edit_or_send(chat_id, message_id,
-                           tr._t("segui_ok", teams=cur), _menu_kb(tr))
+                           tr._t("segui_ok", teams=_h(cur)), _menu_kb(tr))
 
     def _show_unfollow(self, chat_id, message_id):
         from app.live import _load_follows
@@ -548,7 +617,7 @@ class TelegramBot:
             text = tr._t("stop_ok_all")
         else:
             removed = remove_follow(chat_id, [target])
-            text = tr._t("stop_ok", teams=", ".join(removed)) if removed \
+            text = tr._t("stop_ok", teams=_h(", ".join(removed))) if removed \
                 else tr._t("stop_none")
         self._edit_or_send(chat_id, message_id, text, _menu_kb(tr))
 
@@ -571,7 +640,7 @@ class TelegramBot:
             return
         add_follow(chat_id, found)
         cur = ", ".join(_load_follows().get(str(chat_id), []))
-        self._send(chat_id, tr._t("segui_ok", teams=cur), _menu_kb(tr))
+        self._send(chat_id, tr._t("segui_ok", teams=_h(cur)), _menu_kb(tr))
 
     def _stopsegui(self, chat_id, arg):
         from app.live import _load_follows, remove_follow
@@ -584,7 +653,7 @@ class TelegramBot:
         candidates = _parse_teams(self.store)
         teams = [candidates.get(_norm(t.strip())) for t in arg.split(",")]
         removed = remove_follow(chat_id, [t for t in teams if t])
-        text = tr._t("stop_ok", teams=", ".join(removed)) if removed \
+        text = tr._t("stop_ok", teams=_h(", ".join(removed))) if removed \
             else tr._t("stop_none")
         self._send(chat_id, text, _menu_kb(tr))
 
@@ -609,7 +678,9 @@ class TelegramBot:
             "/capo coach del <Squadra>\n\n"
             "🎟️ ABBONAMENTI:\n"
             "/capo coupon <CODICE> — crea un voucher\n"
-            "/capo regala <chat_id> — completo a VITA a quella chat"
+            "/capo regala <chat_id> — completo a VITA a quella chat\n\n"
+            "📜 SOSTENITORI:\n"
+            "/capo donatori — libro dei donatori (totale ⭐)"
         )
         self._send(chat_id, text, _menu_kb(Tr(chat_id)))
 
@@ -804,6 +875,26 @@ class TelegramBot:
         self._send(chat_id, f"🎁 Chat {target_id}: completo ⭐ a VITA regalato!",
                    _menu_kb(tr))
 
+    def _capo_donatori(self, chat_id):
+        donors = kv.read_json("donors.json")
+        donors = donors if isinstance(donors, list) else []
+        if not donors:
+            self._send(chat_id, "📜 Nessun donatore registrato per ora.",
+                       _menu_kb(Tr(chat_id)))
+            return
+        lines = ["📜 <b>Libro dei sostenitori</b>", ""]
+        total = 0
+        for d in sorted(donors, key=lambda x: -((x or {}).get("stars") or 0)):
+            if not isinstance(d, dict):
+                continue
+            total += int(d.get("stars") or 0)
+            when = time.strftime("%d/%m/%Y",
+                                 time.localtime(d.get("last_ts") or 0))
+            lines.append(f"  {d.get('chat')} — <b>{d.get('stars')} ⭐</b> "
+                         f"({d.get('n')} donazioni, ultima {when})")
+        lines.append(f"\n<b>Totale: {total} ⭐</b>")
+        self._send(chat_id, "\n".join(lines), _menu_kb(Tr(chat_id)))
+
     def _handle_capo(self, chat_id, text):
         if not self._is_capo(chat_id):
             self._send(chat_id, "🚫 Comando riservato al Capo.",
@@ -832,6 +923,8 @@ class TelegramBot:
         elif action == "regala":
             nxt = rest.split(" ", 1)[1].strip() if " " in rest else ""
             self._capo_regala(chat_id, nxt)
+        elif action in ("donatori", "donatore", "sostenitori"):
+            self._capo_donatori(chat_id)
         else:
             self._capo_aiuto(chat_id)
 
@@ -851,28 +944,49 @@ class TelegramBot:
         tr = Tr(chat_id)
         payload = {
             "chat_id": chat_id,
-            "title": tr._t("menu_donazioni").replace("⭐ ", ""),
-            "description": "Serie A Stats",
+            "title": tr._t("don_invoice_title"),
+            "description": "Grazie per il supporto a Serie A Stats ❤️",
             "payload": f"don-{chat_id}-{int(time.time())}",
-            "provider_token": "",
+            "provider_token": "",           # obbligatorio vuoto per XTR
             "currency": "XTR",
             "prices": [{"label": "⭐ Telegram Stars", "amount": int(stars)}],
             "start_parameter": "seriea-stats",
         }
         if self._call("sendInvoice", payload) is None:
-            log.warning("Telegram: fattura %d stelle rifiutata per %s",
-                        stars, chat_id)
+            log.warning("Telegram: fattura %d stelle rifiutata per %s (%s)",
+                        stars, chat_id, self._last_err)
+            # errore VISIBILE all'utente: niente fallimenti silenziosi
+            self._send(chat_id, tr._t("don_error",
+                                      err=_h(self._last_err or "errore sconosciuto")),
+                       _don_kb(tr))
 
-    def _on_precheckout(self, query_id):
+    def _on_precheckout(self, query_id, payload=""):
+        log.info("Telegram: pre-checkout ricevuto (payload %s)", payload or "?")
         self._call("answerPreCheckoutQuery",
                    {"pre_checkout_query_id": query_id, "ok": True})
 
     def _on_successful_payment(self, chat_id, payment, payload=""):
         tr = Tr(chat_id)
         stars = payment.get("total_amount") or 0
-        # payload opzionale per verifica futura (invoice_payload)
         if payload:
             log.info("Telegram: pagamento verificato payload %s", payload)
+        # registra il sostenitore (libro dei donatori, visibile al capo)
+        try:
+            donors = kv.read_json("donors.json")
+            donors = donors if isinstance(donors, list) else []
+            entry = next((d for d in donors
+                          if isinstance(d, dict) and d.get("chat") == chat_id),
+                         None)
+            if entry is None:
+                entry = {"chat": chat_id, "stars": 0, "n": 0,
+                         "last_ts": int(time.time())}
+                donors.append(entry)
+            entry["stars"] = int(entry.get("stars") or 0) + int(stars)
+            entry["n"] = int(entry.get("n") or 0) + 1
+            entry["last_ts"] = int(time.time())
+            kv.write_json("donors.json", donors)
+        except Exception as e:
+            log.warning("registrazione donatore fallita: %s", e)
         self._send(chat_id, tr._t("don_thanks", stars=stars), _menu_kb(tr))
 
     # ------------------------------------------------------------ comandi
@@ -887,22 +1001,22 @@ class TelegramBot:
             tr = Tr(chat_id)
             self._send(chat_id,
                        _classifica_text(tr, self.store.get("standings", [])),
-                       _menu_kb(tr))
+                       _menu_kb(tr, section="classifica"))
         elif text.startswith("/giornata") or text.startswith("/partite"):
             tr = Tr(chat_id)
             self._send(chat_id,
                        _giornata_text(tr, self.store.get("fixtures", [])),
-                       _menu_kb(tr))
+                       _menu_kb(tr, section="partite"))
         elif text.startswith("/risultati") or text.startswith("/gare"):
             tr = Tr(chat_id)
             self._send(chat_id,
                        _risultati_text(tr, self.store.get("results", [])),
-                       _menu_kb(tr))
+                       _menu_kb(tr, section="risultati"))
         elif text.startswith("/live"):
             tr = Tr(chat_id)
             self._send(chat_id,
                        _live_text(tr, self.store.get("live") or {}),
-                       _menu_kb(tr))
+                       _menu_kb(tr, section="live"))
         elif text.startswith("/segui"):
             self._segui(chat_id, text[6:].strip())
         elif text.startswith("/stopsegui"):
@@ -915,12 +1029,18 @@ class TelegramBot:
             tr = Tr(chat_id)
             self._send(chat_id,
                        _tracking_text(tr, self.store.get("tracking", {})),
-                       _menu_kb(tr))
+                       _menu_kb(tr, section="tracking"))
         elif text.startswith("/schedina"):
             tr = Tr(chat_id)
             self._send(chat_id,
                        _schedina_text(tr, self.store.get("schedina") or {}),
-                       _menu_kb(tr))
+                       _menu_kb(tr, section="schedina"))
+        elif text.startswith("/presagi") or text.startswith("/sicura") \
+                or text.startswith("/best"):
+            tr = Tr(chat_id)
+            from app import bot_digest
+            self._send(chat_id, bot_digest.presagi_text(self.store),
+                       _menu_kb(tr, section="presagi"))
         elif text.startswith("/pronostici") or text.startswith("/bet"):
             tr = Tr(chat_id)
             result = answer("pronostici", self.store.get("fixtures", []))
@@ -928,7 +1048,7 @@ class TelegramBot:
             note = _pronostici_note(tr, self.store.get("tracking", {}))
             if note:
                 body += "\n\n" + note
-            self._send(chat_id, body, _menu_kb(tr))
+            self._send(chat_id, body, _menu_kb(tr, section="pronostici"))
         elif text.startswith("/ask"):
             question = text[4:].strip() or "pronostici della giornata"
             self._ask(chat_id, question)
@@ -994,23 +1114,66 @@ class TelegramBot:
                 self.store.save()
             except Exception:
                 pass
+        elif not me:
+            log.warning("Telegram: getMe fallito (%s), provo comunque a "
+                        "fare polling", self._last_err)
+        # Il loop NON deve mai morire: qualsiasi eccezione viene loggata e
+        # riprovata. In particolare il pagamento (successful_payment) non va
+        # mai perso per un crash del thread.
+        stall = 1
         while self._running:
-            updates = self._call("getUpdates",
-                                 {"timeout": 30, "offset": self._offset},
-                                 timeout=40)
-            if not updates:
-                time.sleep(1)
-                continue
-            for u in updates:
-                self._process(u)
-                self._offset = u["update_id"] + 1
-                kv.write_json("tg_offset.json", {"offset": self._offset})
+            try:
+                updates = self._call(
+                    "getUpdates",
+                    {"timeout": 30, "offset": self._offset,
+                     "allowed_updates": ALLOWED_UPDATES},
+                    timeout=40)
+                if updates is None:
+                    err = self._last_err or ""
+                    if "Conflict" in err or "409" in err:
+                        log.warning("Telegram: 409 — un altro istante sta "
+                                    "facendo polling sullo stesso token "
+                                    "(istanza duplicata/webhook?): "
+                                    "riprovo tra 30s")
+                        time.sleep(30)
+                    else:
+                        time.sleep(min(stall * 2, 60))
+                        stall = min(stall + 1, 30)
+                    continue
+                stall = 1
+                if not updates:
+                    time.sleep(0.5)
+                    continue
+                for u in updates:
+                    try:
+                        self._process(u)
+                    except Exception as e:
+                        log.exception("Telegram: update %s fallito: %s",
+                                      u.get("update_id"), e)
+                    # l'offset avanza SEMPRE: un update rotto non blocca gli altri
+                    self._offset = u.get("update_id", self._offset) + 1
+                    try:
+                        kv.write_json("tg_offset.json",
+                                      {"offset": self._offset})
+                    except Exception as e:
+                        log.warning("Telegram: salvataggio offset fallito: %s",
+                                    e)
+            except Exception:
+                log.exception("Telegram: errore imprevisto nel loop poll")
+                time.sleep(10)
 
     def stop(self):
         self._running = False
 
     # ----------------------------------------------------------- process
     def _process(self, update):
+        try:
+            self._process_inner(update)
+        except Exception:
+            log.exception("Telegram: errore processando l'update %s",
+                          update.get("update_id"))
+
+    def _process_inner(self, update):
         cb = update.get("callback_query") or {}
         if cb:
             chat = (cb.get("message") or {}).get("chat") or {}
@@ -1023,7 +1186,7 @@ class TelegramBot:
 
         pck = update.get("pre_checkout_query") or {}
         if pck:
-            self._on_precheckout(pck.get("id"))
+            self._on_precheckout(pck.get("id"), pck.get("invoice_payload") or "")
             return
 
         msg = update.get("message") or {}
@@ -1031,17 +1194,21 @@ class TelegramBot:
         chat_id = chat.get("id")
         if not chat_id:
             return
-        if not self._authorized(chat_id):
-            log.info("Telegram: chat %s non autorizzata", chat_id)
-            return
 
+        # il pagamento viene processato PRIMA del gate di autorizzazione:
+        # soldi già incassati => ringraziamento sempre, anche se la lista
+        # TELEGRAM_ALLOWED_IDS è cambiata nel frattempo
         payment = msg.get("successful_payment") or {}
         if payment:
             log.info("Telegram: pagamento %s da %s: %s stelle",
-                     msg.get("invoice_payload"), chat_id,
+                     payment.get("invoice_payload"), chat_id,
                      payment.get("total_amount"))
             self._on_successful_payment(chat_id, payment,
-                                        msg.get("invoice_payload") or "")
+                                        payment.get("invoice_payload") or "")
+            return
+
+        if not self._authorized(chat_id):
+            log.info("Telegram: chat %s non autorizzata", chat_id)
             return
 
         text = (msg.get("text") or "").strip()
