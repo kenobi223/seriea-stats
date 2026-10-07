@@ -164,7 +164,7 @@ main { max-width: 1220px; margin: 0 auto; padding: 26px 20px 48px; }
 .fav-btn[aria-pressed="true"] { color: var(--warn); }
 
 .chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
-.kv .chips, td .chips { margin-top: 0; }
+.kv .chips, td .chips { margin-top: 0; flex-wrap: nowrap; }
 .chip { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; letter-spacing: .01em; border: 1px solid transparent; white-space: nowrap; }
 .chip.v { background: rgba(62,207,142,.13); color: var(--chip-v); border-color: rgba(62,207,142,.24); }
 .chip.n { background: rgba(148,163,184,.12); color: var(--chip-n); border-color: rgba(148,163,184,.16); }
@@ -190,7 +190,7 @@ main { max-width: 1220px; margin: 0 auto; padding: 26px 20px 48px; }
 
 table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
 th { text-align: left; color: var(--label); font-weight: 600; font-size: 11.5px; text-transform: none; letter-spacing: .01em; padding: 9px 8px; border-bottom: 1px solid var(--border); }
-td { padding: 9px 8px; border-bottom: 1px solid var(--border); }
+td { padding: 9px 5px; border-bottom: 1px solid var(--border); }
 .tab th:nth-child(n+3):nth-child(-n+10), .tab td:nth-child(n+3):nth-child(-n+10) { text-align: right; }
 tr { transition: background .15s ease; }
 tr:hover td { background: rgba(255,255,255,.03); }
