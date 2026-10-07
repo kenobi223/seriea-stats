@@ -430,78 +430,222 @@ function renderAI() {
 }
 
 // ------------------------------------------------------------- schedina
+function pickRow(p) {
+  const st = p.result === "win" ? "✅" : p.result === "loss" ? "❌" : "⏳";
+  const pct = ((p.prob || 0) * 100).toFixed(0) + "%";
+  const score = p.score ? `  ${p.score}` : "";
+  const lbl = ({1: "1", x: "X", 2: "2", "over_2.5": "Over 2.5",
+                "under_2.5": "Under 2.5", si: "BTTS Sì", no: "BTTS No"})[p.pick] || p.pick;
+  return `<div class="card"><div class="kv"><span>${esc(p.home)} - ${esc(p.away)}${score}</span>
+      <span class="chip">${st}</span></div>
+      <div class="muted">${esc(lbl)} @ ${fmtOdds(p.odds)} · prob. ${pct}${p.edge != null ? " · edge " + (p.edge * 100).toFixed(0) + "%" : ""}</div></div>`;
+}
+
 function renderSchedina() {
-  const container = document.getElementById("tab-schedina");
-  const d = state.data;
-  if (!d || !d.fixtures) {
-    container.innerHTML = `<div class="card">Schedina non disponibile.</div>`;
+  const el = document.getElementById("tab-schedina");
+  const s = state.data.schedina || {};
+  if (!s.round || !s.picks || !s.picks.length) {
+    el.innerHTML = `<div class="section-title">🎫 Schedina della giornata</div>
+      <div class="card muted">Nessuna schedina disponibile: viene creata prima della prima partita della giornata con gli esiti più probabili del modello.</div>`;
     return;
   }
-
-  let html = `
-    <div class="card">
-      <div class="section-title">Schedina Consigliata del Modello</div>
-      <div class="muted" style="margin-bottom:12px">Le selezioni con maggiore confidenza e valore statistico per la giornata.</div>
-  `;
-
-  let betsCount = 0;
-  let totalOdds = 1.0;
-
-  for (const fx of d.fixtures) {
-    const picks = fx.predictions && fx.predictions.model_picks;
-    if (picks && picks.primary_pick) {
-      betsCount++;
-      html += `
-        <div class="subpanel" style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
-          <div>
-            <b>${esc(fx.home)} - ${esc(fx.away)}</b><br>
-            <span class="muted">Pronostico:</span> <span class="chip v">${esc(picks.primary_pick)}</span>
-          </div>
-          <div style="text-align:right">
-            <span class="muted">Rischio:</span> <b>${esc(picks.risk || "N/D")}</b>
-          </div>
-        </div>
-      `;
-    }
-  }
-
-  if (!betsCount) {
-    html += `<div class="muted">Nessuna giocata suggerita al momento.</div>`;
-  }
-
-  html += `</div>`;
-  container.innerHTML = html;
+  const won = s.picks.filter(p => p.result === "win").length;
+  const lost = s.picks.filter(p => p.result === "loss").length;
+  const rows = s.picks.map(pickRow).join("");
+  const hist = (s.history || []).slice().reverse().map(h =>
+    `<div class="card history-card" onclick="this.classList.toggle('open')">
+       <div class="kv"><span>Giornata ${h.round}</span>
+       <span class="muted">${h.wins} vinti · ${h.losses} persi · ▼</span></div>
+       <div class="history-picks">${(h.picks || []).map(pickRow).join("")}</div>
+     </div>`).join("");
+  el.innerHTML = `<div class="section-title">🎫 Schedina della giornata ${s.round || "?"}</div>
+    <div class="grid3">
+      <div class="card"><div class="big-num">${won}/${s.picks.length}</div>
+        <div class="muted">eventi vinti</div></div>
+      <div class="card"><div class="big-num">${lost}/${s.picks.length}</div>
+        <div class="muted">eventi persi</div></div>
+      <div class="card"><div class="big-num">${s.picks.length}</div>
+        <div class="muted">esiti totali</div></div>
+    </div>${rows}
+    ${hist ? `<div class="section-title" style="margin-top:20px">📚 Schedine passate</div>${hist}` : ""}`;
 }
 
 // ------------------------------------------------------------- tracking (onesta)
+const PICK_LABEL = { over_2_5: "over 2.5", under_2_5: "under 2.5", si: "sì", no: "no" };
+const MARKET_LABEL = { "1x2": "Risultato 1X2", over_under: "Over/Under 2.5", btts: "Entrambe a segno" };
+
+function pickLabel(market, pick) {
+  if (market === "1x2") {
+    return { "1": "vittoria casa", x: "pareggio", "2": "vittoria trasferta" }[pick] || pick;
+  }
+  return PICK_LABEL[pick] || pick;
+}
+
 function renderTracking() {
-  const container = document.getElementById("tab-tracking");
-  const d = state.data;
-  const tr = d && d.tracking;
-  if (!tr) {
-    container.innerHTML = `<div class="card">Dati di tracking non disponibili.</div>`;
-    return;
+  const el = document.getElementById("tab-tracking");
+  const t = state.data.tracking || {};
+  const cal = state.data.calibration || {};
+  const rate = t.bets_rate != null ? (t.bets_rate * 100).toFixed(0) + "%" : "—";
+  const brier = t.brier != null ? t.brier.toFixed(3) : "—";
+
+  let html = `<div class="section-title">Onestà del modello · quanto i pronostici diventano realtà</div>
+    <div class="grid3">
+      <div class="card"><div class="big-num">${t.evaluated || 0}</div>
+        <div class="muted">partite valutate a fine gara</div></div>
+      <div class="card hit-card" onclick="toggleHits(this)"><div class="big-num">${t.bets_hit || 0}/${t.bets_total || 0}</div>
+        <div class="muted">pronostici indovinati (${rate}) · clicca per i dettagli</div></div>
+      <div class="card"><div class="big-num">${brier}</div>
+        <div class="muted">Brier score · più basso = più onesto</div></div>
+    </div>
+    <div id="hit-detail"></div>`;
+
+  // conteggio per PARTITA (una partita può avere più best-bet/vincere in + mercati)
+  if (t.match_bets_total) {
+    const mRate = t.match_bets_rate != null ? (t.match_bets_rate * 100).toFixed(0) + "%" : "—";
+    const mCls = t.match_bets_rate >= 0.5 ? "v" : "warn";
+    html += `<div class="card" style="margin-top:10px"><div class="kv">
+        <span class="muted" style="min-width:150px">Partite con pronostico vinto</span>
+        <span class="chip ${mCls}">${t.match_bets_hit || 0}/${t.match_bets_total} (${mRate})</span></div>
+      <div class="muted" style="margin-top:6px">Conteggio per partita: azzeccata quando almeno un best-bet è stato centrato (il totale sopra è per singolo pronostico).</div></div>`;
   }
 
-  container.innerHTML = `
-    <div class="card">
-      <div class="section-title">Onestà del Modello (Tracking Pronostici)</div>
-      <div class="grid3" style="margin-top:16px">
-        <div class="calib-card">
-          <div class="muted">Totale Pronostici</div>
-          <div class="big-num">${tr.total || 0}</div>
+  const bins = t.calibration_bins || [];
+  // calibrazione: predetto vs reale a fasce
+  if (bins.some(b => b.count > 0)) {
+    html += `<div class="card"><div class="section-title" style="margin-top:0">Calibrazione: che probabilità do vs cosa succede davvero</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">`;
+    for (const b of bins) {
+      if (!b.count) continue;
+      const ok = b.pred != null && b.actual != null;
+      const pct = b.pred * 100;
+      const cls = !ok ? "" : b.actual >= b.pred - 0.06 ? "v" : "warn";
+      html += `<div class="calib-card">
+        <div style="display:flex;justify-content:space-between"><b>${(b.lo * 100).toFixed(0)}–${(b.hi * 100).toFixed(0)}%</b>
+          <span class="chip ${cls}">n=${b.count}</span></div>
+        <div class="prob-bar" style="margin-top:8px">
+          <div style="width:${(b.pred * 100) || 0}%;background:var(--accent)" title="predetto"></div>
         </div>
-        <div class="calib-card">
-          <div class="muted">Pronostici Azzeccati</div>
-          <div class="big-num" style="color:var(--accent)">${tr.correct || 0}</div>
+        <div class="prob-bar" style="margin-top:3px">
+          <div style="width:${(b.actual * 100) || 0}%;background:var(--alert)" title="reale"></div>
         </div>
-        <div class="calib-card">
-          <div class="muted">Percentuale Win</div>
-          <div class="big-num" style="color:var(--accent-2)">${tr.win_rate ? (tr.win_rate * 100).toFixed(1) : "0.0"}%</div>
+        <div class="muted" style="margin-top:4px;font-size:11.5px">
+          per fascia ${b.pred != null ? (b.pred * 100).toFixed(0) + "%" : "—"} predetto ·
+          reale ${b.actual != null ? (b.actual * 100).toFixed(0) + "%" : "—"}
         </div>
-      </div>
-    </div>
-  `;
+      </div>`;
+    }
+    html += `</div><div class="muted" style="margin-top:8px">Barra <span style="color:var(--accent)">blu</span> = probabilità dichiarata,
+      barra <span style="color:var(--alert)">rossa</span> = centratura reale. Se la rossa è più corta della blu, ero troppo ottimista.</div></div>`;
+  }
+
+  // correttori appresi
+  const withCal = Object.keys(MARKET_LABEL).filter(m => cal[m] && Object.keys(cal[m]).length);
+  if (withCal.length) {
+    html += `<div class="card"><div class="section-title" style="margin-top:0">Cosa ho imparato (correttori attivi)</div>`;
+    for (const m of withCal) {
+      html += `<div class="kv"><span class="muted" style="min-width:150px">${MARKET_LABEL[m]}</span>`;
+      for (const [k, f] of Object.entries(cal[m])) {
+        const bad = f > 1 ? "v" : f < 1 ? "warn" : "gray";
+        html += `<span class="chip ${bad}" title="probabilità reale / probabilità stimata">${pickLabel(m, k)} ×${f}</span>`;
+      }
+      html += `</div>`;
+    }
+    html += `<div class="muted" style="margin-top:6px">Le probabilità dei prossimi pronostici vengono moltiplicate per questi fattori (poi rinormalizzate).</div></div>`;
+  }
+
+  // fuori campione: backtest walk-forward (solo round precedenti)
+  const oos = t.oos || {};
+  const oosPicks = (oos.check || {}).picks || {};
+  if (oos.brier_calibrated != null && oos.brier != null && oos.records >= 2) {
+    const imp = oos.improvement != null ? `${oos.improvement >= 0 ? "+" : ""}${oos.improvement.toFixed(3)}` : "—";
+    const arrow = oos.reliable ? "↘" : "↗";
+    html += `<div class="card"><div class="section-title" style="margin-top:0">Fuori campione · vale anche senza vedere il futuro</div>
+      <div class="grid3">
+        <div class="card"><div class="big-num">${oos.brier.toFixed(3)}</div>
+          <div class="muted">Brier as-pubblicato</div></div>
+        <div class="card"><div class="big-num">${oos.brier_calibrated.toFixed(3)}</div>
+          <div class="muted">Brier ri-calibrato OOS ${arrow}</div></div>
+        <div class="card"><div class="big-num">${imp}</div>
+          <div class="muted">miglioramento (negativo = più onesto)</div></div>
+      </div>`;
+    if (oos.rps != null) {
+      const rc = oos.rps_calibrated != null ? oos.rps_calibrated : oos.rps;
+      html += `<div class="kv" style="margin-top:6px"><span class="muted">RPS 1X2 (ordinale) OOS</span>
+        <span class="chip">${oos.rps.toFixed(3)} → ${rc.toFixed(3)}</span></div>`;
+    }
+    if (oos.ci95) {
+      const sig = oos.significant ? "✅ significativo" : "≈ non conclusivo";
+      html += `<div class="kv" style="margin-top:6px"><span class="muted">CI95 miglioramento (bootstrap)</span>
+        <span class="chip ${oos.significant ? "v" : "warn"}">${oos.ci95.lo >= 0 ? "+" : ""}${oos.ci95.lo.toFixed(3)}…${(oos.ci95.hi >= 0 ? "+" : "") + oos.ci95.hi.toFixed(3)} · p_better ${oos.ci95.p_better.toFixed(2)} · ${sig}</span></div>`;
+    }
+    if (oosPicks.total) {
+      html += `<div class="kv" style="margin-top:6px"><span class="muted">Pronostici del modello OOS</span>
+        <span class="chip ${oosPicks.rate >= 0.5 ? "v" : "warn"}">${oosPicks.hit}/${oosPicks.total} (${(oosPicks.rate * 100).toFixed(0)}%)</span></div>`;
+    }
+    html += `<div class="muted" style="margin-top:6px">La calibrazione in produzione usa solo i round già finiti: nessuna fuga di dati avanti.</div></div>`;
+  }
+
+  // errori clamorosi
+  const misses = t.notable_misses || [];
+  if (misses.length) {
+    html += `<div class="card"><div class="section-title" style="margin-top:0">Dove ho sbagliato di più</div>`;
+    for (const m of misses) {
+      html += `<div class="kv"><span><b>${esc(m.home)} - ${esc(m.away)}</b>
+        <span class="muted">(${esc(m.score)} · gj ${esc(m.round || "?")})</span></span>
+        <span><span class="chip warn">${pickLabel(m.market, m.pick)}</span>
+        lo davo al ${(m.prob * 100).toFixed(0)}% @ ${fmtOdds(m.odds)}</span></div>`;
+    }
+    html += `</div>`;
+  }
+
+  // cosa ho imparato
+  const lessons = t.conclusions || [];
+  if (lessons.length) {
+    html += `<div class="card"><div class="section-title" style="margin-top:0">Riepilogo</div><ul style="margin:0;padding-left:18px">`;
+    for (const c of lessons) html += `<li style="margin:3px 0">${esc(c)}</li>`;
+    html += `</ul></div>`;
+  }
+
+  if (!lessons.length && !bins.length) {
+    html = `<div class="section-title">Onestà del modello</div>
+      <div class="card muted">Ancora nessun pronostico valutato: quando le prossime partite finiranno,
+      confronto pronostico vs risultato reale qui, mostro il tasso di centratura e correggo il modello.</div>`;
+  }
+  el.innerHTML = html;
+}
+
+let hitsLoaded = false;
+
+async function toggleHits(card) {
+  card.classList.toggle("open");
+  const box = document.getElementById("hit-detail");
+  const wantOpen = card.classList.contains("open");
+  box.innerHTML = wantOpen ? `<div class="muted">Carico i pronostici indovinati…</div>` : "";
+  if (!wantOpen || hitsLoaded) return;
+  hitsLoaded = true;
+  try {
+    const r = await fetch("/api/tracking-records");
+    const data = await r.json();
+    const rows = [];
+    for (const rec of data.records || []) {
+      for (const h of rec.hits || []) {
+        if (!h.hit) continue;
+        rows.push({ ...h, home: rec.home, away: rec.away, score: rec.score, round: rec.round });
+      }
+    }
+    if (!rows.length) {
+      box.innerHTML = `<div class="card muted">Nessun pronostico indovinato.</div>`;
+      return;
+    }
+    box.innerHTML = `<div class="card"><div class="section-title" style="margin-top:0">✅ Pronostici indovinati (${rows.length})</div>` +
+      rows.map(h => `<div class="kv"><span><b>${esc(h.home)} - ${esc(h.away)}</b>
+        <span class="muted">(${esc(h.score)} · gj ${esc(h.round || "?")})</span></span>
+        <span><span class="chip v">${pickLabel(h.market, h.pick)}</span>
+        lo davo al ${((h.prob || 0) * 100).toFixed(0)}% @ ${fmtOdds(h.odds)}</span></div>`).join("") +
+      `</div>`;
+  } catch (e) {
+    box.innerHTML = `<div class="card muted">Errore nel caricamento dei dettagli.</div>`;
+  }
 }
 
 // ------------------------------------------------------------- controls & init
