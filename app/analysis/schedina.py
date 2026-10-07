@@ -136,6 +136,36 @@ def _slips(store):
     return out
 
 
+def _sig(picks):
+    """Impronta di una schedina: partite + mercati + esiti scelti."""
+    return tuple(sorted(
+        (p.get("fixture_id"), p.get("market"), p.get("pick"))
+        for p in picks or []))
+
+
+def _dedupe_history(history):
+    """Pulisce lo storico dopo un flicker di ``current_round``.
+
+    Se due voci condividono la stessa impronta sono il prodotto del flusso
+    all'indietro della giornata: vengono rimosse ENTRAMBE (nessuna delle
+    due e' affidabile). Resta quindi solo la prima voce per giornata."""
+    hist = list(history or [])
+    counts = {}
+    for h in hist:
+        s = _sig(h.get("picks"))
+        counts[s] = counts.get(s, 0) + 1
+    out, rounds = [], set()
+    for h in hist:
+        if counts[_sig(h.get("picks"))] > 1:
+            continue
+        r = h.get("round")
+        if r in rounds:
+            continue
+        rounds.add(r)
+        out.append(h)
+    return out
+
+
 # ------------------------------------------------------------------- build
 def build(store, now_fx):
     """Crea la schedina del turno se non esiste già e le partite non sono
@@ -147,6 +177,16 @@ def build(store, now_fx):
     upcoming.sort(key=lambda f: f.start_ts)
     rnd = current_round(store)
     cur = store.get("schedina") or {}
+    if rnd is None:
+        return cur
+    if cur.get("round") and rnd < cur.get("round"):
+        # la classifica e' tornata indietro (dati sfasati): senza questo
+        # guard si archiviava la schedina corrente e se ne costruiva una
+        # falsa con le stesse partite -> duplicati nello storico
+        log.warning("schedina: giornata %s precedente alla corrente %s "
+                    "(classifica tornata indietro): ignoro",
+                    rnd, cur.get("round"))
+        return cur
     if cur.get("round") == rnd and cur.get("picks") \
             and cur.get("v") == SCHEDINA_VERSION:
         return cur
@@ -160,7 +200,7 @@ def build(store, now_fx):
     if not picks:
         return cur
 
-    history = list(cur.get("history", []))
+    history = _dedupe_history(cur.get("history", []))
     if cur.get("round") and cur.get("picks") \
             and cur.get("round") != rnd:
         history.append(_summary_record(cur))
@@ -211,6 +251,15 @@ def evaluate(store, client=None):
             log.info("schedina giornata %s: %s-%s %s vs %s -> %s",
                      entry.get("round"), p.get("home"), p.get("away"),
                      p.get("pick"), p.get("score"), p.get("result"))
+    # elimina duplicati storici da flicker (ripulisce anche i dati vecchi)
+    if slip:
+        old_hist = slip.get("history") or []
+        clean = _dedupe_history(old_hist)
+        if clean != old_hist:
+            log.info("schedina: storico ripulito %d -> %d voci "
+                     "(duplicati da flicker)", len(old_hist), len(clean))
+            slip["history"] = clean
+            changed = True
     if changed:
         # aggiorna i contatori delle voci d'archivio
         for h in (slip.get("history") or []):
@@ -326,4 +375,21 @@ if __name__ == "__main__":
                       "picks": [{"fixture_id": "z"}], "history": []}
     slip3 = build(st, fx2)
     assert slip3["round"] == 5 and len(slip3["picks"]) == 1, slip3
+    # la giornata che torna indietro (flicker) non archivia ne ricostruisce
+    st3 = _Store({"standings": [{"played": 4} for _ in range(10)]})
+    st3["schedina"] = {"round": 6, "created_at": 1, "v": SCHEDINA_VERSION,
+                       "picks": [{"fixture_id": "q"}], "history": []}
+    same = build(st3, fx2)
+    assert same is st3["schedina"], same
+    # duplicati da flicker: stessa impronta -> rimossi entrambi
+    dup = [
+        {"round": 5, "picks": [{"fixture_id": "y", "market": "1x2",
+                                "pick": "1", "result": "win"}]},
+        {"round": 6, "picks": [{"fixture_id": "x", "market": "btts",
+                                "pick": "si", "result": "loss"}]},
+        {"round": 5, "picks": [{"fixture_id": "x", "market": "btts",
+                                "pick": "si", "result": "loss"}]},
+    ]
+    clean = _dedupe_history(dup)
+    assert len(clean) == 1 and clean[0]["picks"][0]["fixture_id"] == "y", clean
     print("schedina self-check OK")

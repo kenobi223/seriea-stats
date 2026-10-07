@@ -58,7 +58,7 @@ def create_app(store: Store, tunnel=None):
         return jsonify({
             "round": slip.get("round"), "created_at": slip.get("created_at"),
             "wins": wins, "losses": losses, "picks": picks,
-            "history": slip.get("history", []),
+            "history": schedina._dedupe_history(slip.get("history") or []),
         })
 
     @app.get("/api/tracking-records")
