@@ -38,8 +38,15 @@ def create_app(store: Store, tunnel=None):
 
     @app.get("/healthz")
     def healthz():
-        """Health check leggero per Render (keepalive/ping esterno)."""
-        return jsonify({"ok": True, "updated": store.get("updated", 0)})
+        """Health check leggero per Render (keepalive/ping esterno).
+        Include lo stato del bot Telegram (thread di polling) per diagnosi."""
+        try:
+            from app import telegram as tgmod
+            tg = dict(tgmod.STATUS)
+        except Exception as e:
+            tg = {"started": False, "polling": False, "error": str(e)[:80]}
+        return jsonify({"ok": True, "updated": store.get("updated", 0),
+                        "tg": tg})
 
     @app.get("/api/results")
     def api_results():

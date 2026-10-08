@@ -34,6 +34,9 @@ MAX_MSG = 4096
 # pregressa (webhook/vecchio getUpdates) può escludere i messaggi di pagamento
 ALLOWED_UPDATES = ["message", "callback_query", "pre_checkout_query"]
 
+# Stato del thread di polling, esposto da /healthz per diagnosi da remoto.
+STATUS = {"started": False, "polling": False, "username": "", "error": ""}
+
 INTENTS = {"pronostici": "pronostici"}
 MARKET_KEY = {"1x2": "market_1x2", "over_under": "market_over_under",
               "btts": "market_btts"}
@@ -1295,11 +1298,15 @@ class TelegramBot:
     def start(self):
         if not self.token:
             log.warning("Telegram: nessun token (config.TELEGRAM_BOT_TOKEN)")
+            STATUS.update(started=False, polling=False,
+                          error="nessun token (TELEGRAM_BOT_TOKEN mancante)")
             return
         self._running = True
+        STATUS["started"] = True
         me = self._call("getMe", {})
         if me and me.get("username"):
             self.username = "@" + me["username"]
+            STATUS["username"] = self.username
             log.info("Telegram bot %s online", self.username)
             try:
                 self.store.set("tg_username", self.username)
@@ -1321,7 +1328,9 @@ class TelegramBot:
                      "allowed_updates": ALLOWED_UPDATES},
                     timeout=40)
                 if updates is None:
+                    STATUS["polling"] = False
                     err = self._last_err or ""
+                    STATUS["error"] = err[:120] or "getUpdates fallito"
                     if "Conflict" in err or "409" in err:
                         log.warning("Telegram: 409 — un altro istante sta "
                                     "facendo polling sullo stesso token "
@@ -1333,6 +1342,8 @@ class TelegramBot:
                         stall = min(stall + 1, 30)
                     continue
                 stall = 1
+                STATUS["polling"] = True
+                STATUS["error"] = ""
                 if not updates:
                     time.sleep(0.5)
                     continue
@@ -1350,8 +1361,10 @@ class TelegramBot:
                     except Exception as e:
                         log.warning("Telegram: salvataggio offset fallito: %s",
                                     e)
-            except Exception:
+            except Exception as e:
                 log.exception("Telegram: errore imprevisto nel loop poll")
+                STATUS["polling"] = False
+                STATUS["error"] = str(e)[:120]
                 time.sleep(10)
 
     def stop(self):

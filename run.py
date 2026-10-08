@@ -109,6 +109,13 @@ def main():
         threading.Thread(target=bot.start, name="telegram", daemon=True).start()
     else:
         bot = None
+        try:
+            from app import telegram as _tg
+            _tg.STATUS["error"] = ("thread non avviato: "
+                                   + ("--no-telegram" if not args.telegram
+                                      else "TELEGRAM_BOT_TOKEN mancante"))
+        except Exception:
+            pass
 
     # Agenti CONGELATI su richiesta owner (2026-10-06): non partono a meno che
     # AGENTS_ENABLED=1 sia impostato esplicitamente.
