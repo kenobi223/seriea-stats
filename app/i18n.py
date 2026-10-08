@@ -112,6 +112,33 @@ T = {
         "schedina_history_title": "<b>📚 Schedine passate:</b>",
         "schedina_history_row": "Giornata {r}: {wins} vinti · {losses} persi",
         "schedina_match": "<b>{home} - {away}</b>",
+        "menu_community": "👥 Community",
+        "community_title": "<b>👥 Schedina community — giornata {r}</b>",
+        "community_parts": "👥 {n} partecipanti · un solo invio per giornata",
+        "community_nodata": ("La schedina community si apre con le partite "
+                             "della giornata: scegli un esito per partita "
+                             "(1X2, Over/Under 2.5 o BTTS) e inviala."),
+        "community_mine": "✅ La tua schedina: {n} esiti · {w} vinti · {l} persi · {pend} in attesa",
+        "community_row_win": "{label} {score} ✅",
+        "community_row_loss": "{label} {score} ❌",
+        "community_row_pend": "{label} ⏳",
+        "community_picks_title": "<b>Gli esiti scelti dalla community:</b>",
+        "community_match": "• {home} - {away}",
+        "community_top": "   {market}: {pick} ({n})",
+        "community_no_opts": "— nessun esito ancora",
+        "community_submit": "✅ Invia schedina ({n} esiti)",
+        "community_sent": ("✅ Schedina inviata: {n} esiti per la giornata "
+                           "{r}. I risultati si aggiornano a fine partite."),
+        "community_already": ("Hai già inviato la schedina di questa "
+                              "giornata: un solo invio per giornata."),
+        "community_empty": ("⚠️ Scegli almeno un esito per una partita "
+                            "prima di inviare."),
+        "community_no_match": "Partita non valida per questa giornata: ricarica la schedina.",
+        "community_pick_hint": "📌 {home} - {away}\nScegli l'esito (uno per partita):",
+        "community_market_1x2": "Risultato",
+        "community_market_over_under": "Gol",
+        "community_market_btts": "Reti",
+        "community_current": "✔ Scelto: {label}",
     },
 }
 

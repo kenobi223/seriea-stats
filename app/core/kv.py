@@ -36,6 +36,7 @@ KEYS = {
     "maintenance.json": os.path.join(config.DATA_DIR, "maintenance.json"),
     "digest_sent.json": os.path.join(config.DATA_DIR, "digest_sent.json"),
     "donors.json": os.path.join(config.DATA_DIR, "donors.json"),
+    "community.json": os.path.join(config.DATA_DIR, "community.json"),
 }
 
 

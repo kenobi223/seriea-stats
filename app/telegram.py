@@ -366,7 +366,8 @@ def _menu_kb(tr, section=None):
          (tr._t("menu_pronostici"), "p:pronostici")],
         [(tr._t("menu_schedina"), "p:schedina"),
          (tr._t("menu_tracking"), "p:tracking")],
-        [(tr._t("menu_morale"), "p:morale")],
+        [(tr._t("menu_morale"), "p:morale"),
+         (tr._t("menu_community"), "p:community")],
         [(tr._t("menu_segui"), "flw"),
          (tr._t("menu_stopsegui"), "unf")],
     ]
@@ -384,6 +385,67 @@ def _don_kb(tr):
     rows = [DONATION_OPTIONS[i:i + 3] for i in range(0, len(DONATION_OPTIONS), 3)]
     buttons = [[("⭐ " + str(s), f"don:{s}") for s in row] for row in rows]
     return _kb(buttons + [[(tr._t("menu_menu"), "m")]])
+
+
+# ---------------------------------------------------------------- community
+_CM_OPTS = (
+    ("1x2", (("1", "1"), ("x", "X"), ("2", "2"))),
+    ("over_under", (("over_2.5", "Over"), ("under_2.5", "Under"))),
+    ("btts", (("si", "Sì"), ("no", "No"))),
+)
+
+
+def _cm_pick_label(market, key):
+    from app.core import markets
+    return markets.label(market, key)
+
+
+def _cm_fid_label(fx, n=12):
+    return f"{_h(fx.get('home'))[:n]}–{_h(fx.get('away'))[:n]}"
+
+
+def _community_body(tr, store, chat_id):
+    """Testo della sezione community. Ritorna (testo, snapshot|None)."""
+    from app import community
+    snap = community.snapshot(store, key=f"tg:{chat_id}")
+    if not snap.get("round") or not snap.get("fixtures"):
+        return tr._t("community_nodata"), None
+    lines = [tr._t("community_title", r=snap["round"]),
+             tr._t("community_parts", n=snap["participants"]), ""]
+    my = snap.get("my")
+    if my:
+        w, l, pend = community.entry_counts(my)
+        lines.append(tr._t("community_mine", n=len(my.get("picks") or []),
+                           w=w, l=l, pend=pend))
+        for pk in my.get("picks") or []:
+            label = _cm_pick_label(pk.get("market"), pk.get("pick"))
+            score = pk.get("score") or ""
+            if pk.get("result") == "win":
+                lines.append("  " + tr._t("community_row_win",
+                                          label=label, score=score))
+            elif pk.get("result") == "loss":
+                lines.append("  " + tr._t("community_row_loss",
+                                          label=label, score=score))
+            else:
+                lines.append("  " + tr._t("community_row_pend", label=label))
+        lines.append("")
+    lines.append(tr._t("community_picks_title"))
+    for fx in snap["fixtures"]:
+        lines.append(tr._t("community_match", home=_h(fx.get("home")),
+                           away=_h(fx.get("away"))))
+        agg = snap["aggregates"].get(fx["id"]) or {}
+        if not agg:
+            lines.append("  " + tr._t("community_no_opts"))
+            continue
+        for mkt, _opts in _CM_OPTS:
+            per = agg.get(mkt) or {}
+            if not per:
+                continue
+            pick, n = max(per.items(), key=lambda kv: kv[1])
+            lines.append(tr._t("community_top",
+                               market=tr._t(f"community_market_{mkt}"),
+                               pick=_cm_pick_label(mkt, pick), n=n))
+    return "\n".join(lines), snap
 
 
 def _teams_kb(store, tr, prefix, teams=None):
@@ -412,6 +474,7 @@ class TelegramBot:
         self._offset = 0
         self._running = False
         self._last_err = ""
+        self._cm_drafts = {}      # community: bozze per chat {fid: {market,pick}}
         off = kv.read_json("tg_offset.json")
         if isinstance(off, dict) and isinstance(off.get("offset"), int):
             self._offset = off["offset"]
@@ -523,6 +586,12 @@ class TelegramBot:
 
     def _open_section(self, chat_id, message_id, section):
         tr = Tr(chat_id)
+        if section == "community":
+            text, snap = _community_body(tr, self.store, chat_id)
+            kb = self._community_kb(tr, snap, chat_id) if snap \
+                else _menu_kb(tr, section=section)
+            self._edit_or_send(chat_id, message_id, text, kb)
+            return
         text = self._section_text(tr, section)
         kb = _menu_kb(tr, section=section)
         if section in ("pronostici",):
@@ -584,6 +653,12 @@ class TelegramBot:
                 # la schermata resta aperta (l'utente può scegliere altro
                 # importo); la fattura arriva come nuovo messaggio
                 self._send_invoice(chat_id, stars)
+            elif data.startswith("cmk:"):
+                self._cm_pick(chat_id, message_id, data[4:])
+            elif data.startswith("cm:"):
+                self._cm_match(chat_id, message_id, data[3:])
+            elif data == "cmsub":
+                self._cm_submit(chat_id, message_id)
         except Exception as e:
             log.error("Telegram: callback %s fallita: %s", data, e)
 
@@ -656,6 +731,123 @@ class TelegramBot:
         text = tr._t("stop_ok", teams=_h(", ".join(removed))) if removed \
             else tr._t("stop_none")
         self._send(chat_id, text, _menu_kb(tr))
+
+    # ----------------------------------------------------------- community
+    def _community_draft(self, chat_id):
+        return self._cm_drafts.setdefault(str(chat_id), {})
+
+    def _community_kb(self, tr, snap, chat_id):
+        """Tastiera community: scelta partite + invio, o solo refresh se
+        la schedina è già stata inviata."""
+        if snap.get("my"):
+            return _menu_kb(tr, section="community")
+        fixtures = snap.get("fixtures") or []
+        draft = self._community_draft(chat_id)
+        valid = {f["id"] for f in fixtures}
+        for k in list(draft):
+            if k not in valid:
+                del draft[k]
+        rows = []
+        for i in range(0, len(fixtures), 2):
+            row = []
+            for fx in fixtures[i:i + 2]:
+                label = _cm_fid_label(fx)
+                if fx["id"] in draft:
+                    label = "✓ " + label
+                row.append((label, f"cm:{fx['id']}"))
+            rows.append(row)
+        if draft:
+            rows.append([(tr._t("community_submit", n=len(draft)), "cmsub")])
+        rows.append([(tr._t("section_refresh"), "p:community"),
+                     (tr._t("menu_menu"), "m")])
+        return _kb(rows)
+
+    def _cm_match(self, chat_id, message_id, fid):
+        tr = Tr(chat_id)
+        text, snap = _community_body(tr, self.store, chat_id)
+        if not snap:
+            self._edit_or_send(chat_id, message_id, text, _menu_kb(tr))
+            return
+        fixtures = {f["id"]: f for f in snap["fixtures"]}
+        fx = fixtures.get(str(fid))
+        if not fx:
+            self._edit_or_send(chat_id, message_id,
+                               tr._t("community_no_match"),
+                               self._community_kb(tr, snap, chat_id))
+            return
+        draft = self._community_draft(chat_id)
+        cur = draft.get(str(fid))
+        lines = [text, "",
+                 tr._t("community_pick_hint", home=_h(fx.get("home")),
+                       away=_h(fx.get("away")))]
+        if cur:
+            lines.append(tr._t("community_current",
+                               label=_cm_pick_label(cur.get("market"),
+                                                    cur.get("pick"))))
+        rows = []
+        for mkt, opts in _CM_OPTS:
+            row = []
+            for pk, lbl in opts:
+                on = cur and cur.get("market") == mkt and cur.get("pick") == pk
+                row.append((("✓ " + lbl) if on else lbl, f"cmk:{fid}:{mkt}:{pk}"))
+            rows.append(row)
+        if draft:
+            rows.append([(tr._t("community_submit", n=len(draft)), "cmsub")])
+        rows.append([(tr._t("back"), "p:community")])
+        self._edit_or_send(chat_id, message_id, "\n".join(lines), _kb(rows))
+
+    def _cm_pick(self, chat_id, message_id, rest):
+        tr = Tr(chat_id)
+        parts = rest.split(":", 2)
+        if len(parts) != 3:
+            return
+        fid, mkt, pk = parts
+        from app import community
+        ok = mkt in community.VALID and pk in community.VALID[mkt]
+        if ok:
+            ok = str(fid) in {str(f.get("id")) for f in
+                              self.store.get("fixtures") or []
+                              if f.get("id") is not None}
+        if not ok:
+            self._send(chat_id, tr._t("community_no_match"))
+            return
+        draft = self._community_draft(chat_id)
+        cur = draft.get(fid)
+        if cur and cur.get("market") == mkt and cur.get("pick") == pk:
+            del draft[fid]                       # secondo toglie la scelta
+        else:
+            draft[fid] = {"market": mkt, "pick": pk}
+        self._cm_match(chat_id, message_id, fid)
+
+    def _cm_submit(self, chat_id, message_id):
+        from app import community
+        tr = Tr(chat_id)
+        draft = self._cm_drafts.get(str(chat_id)) or {}
+        picks = [{"fixture_id": fid, "market": v.get("market"),
+                  "pick": v.get("pick")} for fid, v in draft.items()]
+        text, snap = _community_body(tr, self.store, chat_id)
+        if not picks:
+            note = tr._t("community_already") if (snap or {}).get("my") \
+                else tr._t("community_empty")
+            self._edit_or_send(chat_id, message_id, f"{text}\n\n{note}",
+                               self._community_kb(tr, snap, chat_id) if snap
+                               else _menu_kb(tr))
+            return
+        status, _entry = community.submit(self.store, f"tg:{chat_id}", picks,
+                                          meta={"source": "telegram"})
+        kb = _menu_kb(tr, section="community") if snap else _menu_kb(tr)
+        if status == "ok":
+            self._cm_drafts.pop(str(chat_id), None)
+            note = tr._t("community_sent", n=len(picks),
+                         r=(snap or {}).get("round") or "?")
+            self._edit_or_send(chat_id, message_id, f"{text}\n\n{note}", kb)
+        elif status == "already":
+            self._edit_or_send(chat_id, message_id,
+                               f"{text}\n\n{tr._t('community_already')}", kb)
+        else:
+            self._edit_or_send(chat_id, message_id, f"{text}\n\n❌ {status}",
+                               self._community_kb(tr, snap, chat_id) if snap
+                               else _menu_kb(tr))
 
     # -------------------------------------------------------------- capo
     def _is_capo(self, chat_id):

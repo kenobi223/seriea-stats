@@ -665,6 +665,156 @@ async function toggleHits(card) {
   }
 }
 
+// ------------------------------------------------------------- community
+const CM_MARKETS = [
+  { market: "1x2", label: "Risultato", options: [["1", "1"], ["x", "X"], ["2", "2"]] },
+  { market: "over_under", label: "Gol", options: [["over_2.5", "Over 2.5"], ["under_2.5", "Under 2.5"]] },
+  { market: "btts", label: "Reti", options: [["si", "Sì"], ["no", "No"]] },
+];
+let cmState = null;
+let cmDraft = {};
+let cmFetching = false;
+let cmError = false;
+
+function cmPickLabel(market, pick) {
+  const mk = CM_MARKETS.find(m => m.market === market);
+  const opt = mk && mk.options.find(o => o[0] === pick);
+  return opt ? opt[1] : pick;
+}
+
+async function refreshCommunity() {
+  try {
+    const res = await fetch("/api/community");
+    if (!res.ok) throw new Error("community fetch failed");
+    cmState = await res.json();
+    cmError = false;
+  } catch (err) {
+    console.error("community:", err);
+    cmError = true;
+  }
+  renderCommunity();
+}
+
+async function submitCommunity() {
+  const picks = Object.keys(cmDraft).map(fid => ({
+    fixture_id: fid, market: cmDraft[fid].market, pick: cmDraft[fid].pick,
+  }));
+  if (!picks.length) return;
+  const btn = document.getElementById("cm-submit");
+  if (btn) { btn.disabled = true; btn.textContent = "Invio…"; }
+  try {
+    const res = await fetch("/api/community", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ round: cmState && cmState.round, picks }),
+    });
+    cmDraft = {};
+    if (!res.ok && res.status !== 409) {
+      const err = await res.json().catch(() => ({}));
+      console.error("community submit:", err);
+    }
+  } catch (err) {
+    console.error("community submit:", err);
+  }
+  await refreshCommunity();
+}
+
+async function renderCommunity() {
+  const el = document.getElementById("tab-community");
+  if (!el) return;
+  if (!cmState) {
+    if (cmError) {
+      el.innerHTML = `<div class="section-title">Schedina community</div>
+        ${stateBlock("Errore di caricamento", "Non riesco a caricare la schedina community. Riprova.", true)}`;
+      return;
+    }
+    el.innerHTML = `<div class="section-title">Schedina community</div>${renderSkeleton()}`;
+    if (!cmFetching) {
+      cmFetching = true;
+      refreshCommunity().finally(() => { cmFetching = false; });
+    }
+    return;
+  }
+  const d = cmState;
+  if (!d.round || !d.fixtures || !d.fixtures.length) {
+    el.innerHTML = `<div class="section-title">Schedina community</div>
+      ${stateBlock("Nessuna schedina aperta", "La schedina community si apre con le partite della giornata: scegli un esito per partita (1X2, Over/Under 2.5 o BTTS) e inviala. Una sola schedina per giornata.")}`;
+    return;
+  }
+  const mine = d.my;
+  const myByFid = {};
+  (mine ? mine.picks || [] : []).forEach(p => { myByFid[p.fixture_id] = p; });
+  const wins = mine ? mine.picks.filter(p => p.result === "win").length : 0;
+  const losses = mine ? mine.picks.filter(p => p.result === "loss").length : 0;
+  const pending = mine ? mine.picks.filter(p => !p.result).length : 0;
+  const draftN = Object.keys(cmDraft).length;
+
+  const cards = d.fixtures.map(fx => {
+    const ag = d.aggregates[fx.id] || {};
+    const my = myByFid[fx.id];
+    let badge = "";
+    if (my) {
+      const cls = my.result === "win" ? "chip v" : my.result === "loss" ? "chip p" : "chip gray";
+      const res = my.result === "win" ? `${my.score} ✅` : my.result === "loss" ? `${my.score} ❌` : "⏳";
+      badge = `<span class="${cls}">${cmPickLabel(my.market, my.pick)} ${esc(res)}</span>`;
+    }
+    const groups = CM_MARKETS.map(mk => {
+      const opts = mk.options.map(([pk, lbl]) => {
+        const n = ((ag[mk.market] || {})[pk]) || 0;
+        const on = my
+          ? my.market === mk.market && my.pick === pk
+          : cmDraft[fx.id] && cmDraft[fx.id].market === mk.market && cmDraft[fx.id].pick === pk;
+        const dis = mine ? "disabled" : "";
+        return `<button type="button" class="cm-opt${on ? " on" : ""}" ${dis}
+          data-fid="${esc(fx.id)}" data-m="${esc(mk.market)}" data-p="${esc(pk)}"
+          aria-pressed="${on ? "true" : "false"}">${lbl}${n ? `<span class="n">${n}</span>` : ""}</button>`;
+      }).join("");
+      return `<div class="cm-group"><span class="cm-group-label">${mk.label}</span>${opts}</div>`;
+    }).join("");
+    return `<div class="card"><div class="kv"><b>${esc(fx.home)} - ${esc(fx.away)}</b>${badge}</div>
+      <div class="cm-groups">${groups}</div></div>`;
+  }).join("");
+
+  const stats = mine
+    ? `<div class="grid3">
+        <div class="card"><div class="big-num">${d.participants}</div><div class="muted">partecipanti</div></div>
+        <div class="card"><div class="big-num">${mine.picks.length}</div><div class="muted">i tuoi esiti</div></div>
+        <div class="card"><div class="big-num">${wins}/${mine.picks.length}</div><div class="muted">vinti · ${losses} persi${pending ? " · " + pending + " pending" : ""}</div></div>
+      </div>`
+    : `<div class="grid3">
+        <div class="card"><div class="big-num">${d.participants}</div><div class="muted">partecipanti</div></div>
+        <div class="card"><div class="big-num">${draftN}/${d.fixtures.length}</div><div class="muted">esiti scelti</div></div>
+        <div class="card"><div class="big-num">1</div><div class="muted">schedina per giornata</div></div>
+      </div>`;
+
+  const action = mine
+    ? `<div class="cm-sent">✅ Schedina inviata per la giornata ${esc(String(d.round))} — i risultati si aggiornano a fine partite. Non puoi modificarla.</div>`
+    : `<button type="button" class="cm-submit" id="cm-submit" ${draftN ? "" : "disabled"}>
+        ✅ Invia schedina${draftN ? ` (${draftN} esiti)` : ""}</button>
+       <div class="muted" style="margin-top:8px">Scegli almeno un esito. Una sola schedina per giornata.</div>`;
+
+  el.innerHTML = `<div class="section-title">👥 Schedina community — giornata ${esc(String(d.round))}</div>
+    ${stats}${action}${cards}`;
+
+  if (!mine) {
+    el.querySelectorAll(".cm-opt").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const fid = btn.getAttribute("data-fid");
+        const m = btn.getAttribute("data-m");
+        const p = btn.getAttribute("data-p");
+        if (cmDraft[fid] && cmDraft[fid].market === m && cmDraft[fid].pick === p) {
+          delete cmDraft[fid];
+        } else {
+          cmDraft[fid] = { market: m, pick: p };
+        }
+        renderCommunity();
+      });
+    });
+    const submitBtn = document.getElementById("cm-submit");
+    if (submitBtn) submitBtn.addEventListener("click", submitCommunity);
+  }
+}
+
 // ------------------------------------------------------------- controls & init
 function renderActive() {
   const activeTab = document.querySelector("#tabs button.active");
@@ -688,6 +838,7 @@ function renderActive() {
   else if (tabId === "teams") renderTeams();
   else if (tabId === "ai") renderAI();
   else if (tabId === "schedina") renderSchedina();
+  else if (tabId === "community") renderCommunity();
   else if (tabId === "tracking") renderTracking();
 }
 

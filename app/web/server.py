@@ -61,6 +61,39 @@ def create_app(store: Store, tunnel=None):
             "history": schedina._dedupe_history(slip.get("history") or []),
         })
 
+    def _client_ip():
+        xff = request.headers.get("X-Forwarded-For") or ""
+        if xff:
+            return xff.split(",")[0].strip()
+        return request.remote_addr or "sconosciuto"
+
+    @app.get("/api/community")
+    def api_community():
+        """Schedina community della giornata: partite, aggregati, la mia."""
+        from app import community
+        key = "ip:" + _client_ip()
+        try:
+            community.evaluate(store)
+        except Exception as e:
+            log.debug("community evaluate (read) fallita: %s", e)
+        return jsonify(community.snapshot(store, key=key))
+
+    @app.post("/api/community")
+    def api_community_submit():
+        """Invio schedina community: 1 per IP a giornata."""
+        from app import community
+        body = request.get_json(silent=True) or {}
+        key = "ip:" + _client_ip()
+        status, entry = community.submit(
+            store, key, body.get("picks"),
+            meta={"source": "web", "ip": _client_ip()},
+            rnd=body.get("round"))
+        if status == "ok":
+            return jsonify({"ok": True, "entry": entry})
+        if status == "already":
+            return jsonify({"error": "already", "entry": entry}), 409
+        return jsonify({"error": status}), 400
+
     @app.get("/api/tracking-records")
     def api_tracking_records():
         """Record valutati dal tracker: pick/best-bet vs esito reale (debug)."""

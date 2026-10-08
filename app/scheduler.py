@@ -356,6 +356,13 @@ def run_cycle(store):
     except Exception as e:
         log.debug("schedina giornata fallita: %s", e)
 
+    # ---- schedina community: valuta i pick degli utenti vs risultati
+    try:
+        from app import community as community_mod
+        community_mod.evaluate(store)
+    except Exception as e:
+        log.debug("community evaluate fallita: %s", e)
+
     # ---- errore di quota / arbitraggi / movimenti
     value_flags = value_mod.detect_variables(now_fx)
     for fx in now_fx:
