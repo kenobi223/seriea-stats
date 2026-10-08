@@ -43,6 +43,7 @@ def create_app(store: Store, tunnel=None):
         try:
             from app import telegram as tgmod
             tg = dict(tgmod.STATUS)
+            tg["owner_count"] = len(config.TELEGRAM_OWNER_IDS)
         except Exception as e:
             tg = {"started": False, "polling": False, "error": str(e)[:80]}
         return jsonify({"ok": True, "updated": store.get("updated", 0),
