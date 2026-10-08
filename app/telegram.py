@@ -1365,7 +1365,85 @@ class TelegramBot:
             log.exception("Telegram: errore processando l'update %s",
                           update.get("update_id"))
 
+    def _touch_user(self, update):
+        """Al primo contatto di una chat la registra (tg_users.json) e
+        avvisa il capo su Telegram. Mai un errore blocca il processing."""
+        try:
+            cb = update.get("callback_query") or {}
+            msg = update.get("message") or {}
+            user = (cb or msg).get("from") or {}
+            uid = user.get("id")
+            if not uid or user.get("is_bot"):
+                return
+            chat = msg.get("chat") or (cb.get("message") or {}).get("chat") or {}
+            chat_id = chat.get("id") or uid
+            if chat_id in config.TELEGRAM_OWNER_IDS:
+                return
+            kind = "tasto" if cb else "messaggio"
+            now = int(time.time())
+            data = kv.read_json("tg_users.json")
+            users = data.get("users") if isinstance(data, dict) else None
+            if not isinstance(users, dict):
+                users = {}
+                data = {"users": users}
+            if not data.get("seeded"):
+                # utenti già noti (chi ha fatto /start o segue squadre):
+                # non devono passare per "nuovi" al primo avvio
+                try:
+                    from app import notify as notify_mod
+                    known = set(notify_mod.load_started())
+                    if not known:
+                        follows = kv.read_json("follows.json")
+                        if isinstance(follows, dict):
+                            known = {int(c) for c in follows
+                                     if str(c).lstrip("-").isdigit()}
+                    for cid in known:
+                        users.setdefault(str(cid), {"uid": cid,
+                                                    "name": str(cid),
+                                                    "username": "",
+                                                    "first_seen": 0,
+                                                    "last_seen": 0})
+                    data["seeded"] = True
+                    kv.write_json("tg_users.json", data)
+                except Exception as e:
+                    log.debug("seed utenti noti fallito: %s", e)
+            key = str(chat_id)
+            entry = users.get(key)
+            if entry is not None:
+                # ultimo accesso aggiornato al massimo una volta al giorno
+                if now - int(entry.get("last_seen") or 0) >= 86400:
+                    entry["last_seen"] = now
+                    kv.write_json("tg_users.json", data)
+                return
+            first = user.get("first_name") or ""
+            last = user.get("last_name") or ""
+            name = f"{first} {last}".strip() or user.get("username") or str(uid)
+            users[key] = {"uid": uid, "name": name,
+                          "username": user.get("username") or "",
+                          "first_seen": now, "last_seen": now}
+            kv.write_json("tg_users.json", data)
+            ctype = {"private": "privato", "group": "gruppo",
+                     "supergroup": "gruppo"}.get(chat.get("type"),
+                                                 chat.get("type") or "?")
+            auth = "✅ autorizzato" if self._authorized(chat_id) \
+                else "⛔ non autorizzato"
+            who = _h(name) + (f" (@{_h(user.get('username'))})"
+                              if user.get("username") else "")
+            lines = [f"👋 <b>Nuovo utente sul bot</b>: {who}",
+                     f"id <code>{uid}</code>"
+                     + (f" · chat <code>{chat_id}</code>" if chat_id != uid else "")
+                     + f" · {ctype} · primo accesso: {kind}",
+                     f"{auth} · utenti totali: {len(users)}"]
+            for owner in config.TELEGRAM_OWNER_IDS:
+                if owner != chat_id:
+                    self._send(owner, "\n".join(lines))
+            log.info("Telegram: nuovo utente %s (chat %s), capo avvisato",
+                     who, chat_id)
+        except Exception as e:
+            log.debug("notifica nuovo utente fallita: %s", e)
+
     def _process_inner(self, update):
+        self._touch_user(update)
         cb = update.get("callback_query") or {}
         if cb:
             chat = (cb.get("message") or {}).get("chat") or {}

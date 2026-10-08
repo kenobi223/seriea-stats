@@ -32,6 +32,7 @@ KEYS = {
     "market_alpha.json": config.MARKET_ALPHA_FILE,
     "ou_alert.json": config.OU_ALERT_FILE,
     "tg_offset.json": os.path.join(config.DATA_DIR, "tg_offset.json"),
+    "tg_users.json": os.path.join(config.DATA_DIR, "tg_users.json"),
     "coaches.json": config.COACHES_FILE,
     "maintenance.json": os.path.join(config.DATA_DIR, "maintenance.json"),
     "digest_sent.json": os.path.join(config.DATA_DIR, "digest_sent.json"),
