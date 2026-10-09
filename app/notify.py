@@ -8,6 +8,7 @@ La notifica parte una sola volta per pronostico (flag win_notified).
 import logging
 import os
 import threading
+import time
 
 import requests
 
@@ -71,6 +72,40 @@ def _send_photo(chat_id, photo_path, caption):
     except Exception as e:
         log.warning("foto a %s fallita: %s", chat_id, e)
         return False
+
+
+def _send_text(chat_id, text):
+    if not config.TELEGRAM_BOT_TOKEN:
+        return False
+    url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
+    try:
+        with _send_lock:
+            r = requests.post(url, json={"chat_id": chat_id, "text": text,
+                                         "disable_web_page_preview": True},
+                              timeout=25)
+        r.raise_for_status()
+        return True
+    except Exception as e:
+        log.warning("testo a %s fallito: %s", chat_id, e)
+        return False
+
+
+def broadcast_text(text):
+    """Invia un testo a tutte le chat avviate (/start)."""
+    started = load_started()
+    if not started:
+        seed_started()
+        started = load_started()
+    sent, failed = 0, []
+    for chat in started:
+        if _send_text(chat, text):
+            sent += 1
+        else:
+            failed.append(chat)
+        time.sleep(0.05)
+    log.info("broadcast: %d chat, %d inviati, %d falliti",
+             len(started), sent, len(failed))
+    return {"total": len(started), "sent": sent, "failed": failed}
 
 
 def _caption(win):

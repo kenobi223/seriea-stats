@@ -286,6 +286,25 @@ def create_app(store: Store, tunnel=None):
             return redirect(link, code=302)
         return jsonify({"error": "Telegram bot non configurato (TELEGRAM_BOT_LINK)"}), 404
 
+    @app.post("/api/broadcast")
+    def api_broadcast():
+        """Broadcast testo a tutte le chat che hanno fatto /start."""
+        if request.args.get("token") != os.environ.get(
+                "MAINTENANCE_TOKEN", "test123"):
+            return jsonify({"error": "token errato"}), 403
+        body = request.get_json(silent=True) or {}
+        text = str(body.get("text") or "").strip()
+        if not text:
+            return jsonify({"error": "testo mancante"}), 400
+        if len(text) > 4096:
+            return jsonify({"error": "testo troppo lungo (max 4096)"}), 400
+        try:
+            from app import notify
+            res = notify.broadcast_text(text)
+            return jsonify({"ok": True, **res})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     @app.get("/api/test-notify")
     def api_test_notify():
         """Manda subito un test a @Ziosapi con tasti OK/Rifiuta."""
