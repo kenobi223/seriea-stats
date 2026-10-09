@@ -44,6 +44,17 @@ def create_app(store: Store, tunnel=None):
             from app import telegram as tgmod
             tg = dict(tgmod.STATUS)
             tg["owner_count"] = len(config.TELEGRAM_OWNER_IDS)
+            # contatori utenti (solo numeri, nessun dato personale)
+            users = kv.read_json("tg_users.json")
+            tg["users"] = len(users.get("users") or {}) \
+                if isinstance(users, dict) else 0
+            from app import notify
+            tg["started_users"] = len(notify.load_started())
+            follows = kv.read_json("follows.json")
+            tg["follows"] = len(follows) if isinstance(follows, dict) else 0
+            donors = kv.read_json("donors.json")
+            tg["donors"] = len(donors) if isinstance(donors, (dict, list)) \
+                else 0
         except Exception as e:
             tg = {"started": False, "polling": False, "error": str(e)[:80]}
         return jsonify({"ok": True, "updated": store.get("updated", 0),
