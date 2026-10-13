@@ -76,7 +76,10 @@ class HTTPClient:
     def _send(self, url, params, timeout, headers, proxy):
         global _requests_since_rotate
         if proxy:
-            if _requests_since_rotate >= TOR_ROTATE_EVERY:
+            # rotazione periodica disattivabile per client di servizio che
+            # non devono disturbare i circuiti del client principale
+            if not getattr(self, "no_rotate", False) and \
+                    _requests_since_rotate >= TOR_ROTATE_EVERY:
                 _requests_since_rotate = 0
                 log.info("rotazione circuito Tor (%d richieste)", TOR_ROTATE_EVERY)
                 tor_newnym()

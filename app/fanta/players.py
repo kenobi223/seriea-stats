@@ -23,12 +23,10 @@ _build_lock = threading.Lock()
 
 INDEX_KEY = "fanta_index.json"
 STATS_KEY = "fanta_stats.json"
+STATUS_KEY = "fanta_index_status.json"
 INDEX_TTL = 12 * 3600
 STATS_TTL = 24 * 3600
 MAX_STATS_CACHE = 800
-# base alternativa: www.sofascore.com è dietro Akamai WAF e risponde 403 su
-# alcuni path (team/{id}/players); api.sofascore.com espone la stessa API v1
-API_BASE = "https://api.sofascore.com/api/v1"
 
 POS_MAP = {
     "Goalkeeper": "P", "Defender": "D", "Midfielder": "C", "Attacker": "A",
@@ -40,13 +38,28 @@ def _client():
     global _CLIENT
     with _client_lock:
         if _CLIENT is None:
-            from app.core.http import HTTPClient
             from app.sources.sofascore import SofascoreClient
             cl = SofascoreClient()
-            cl.http = HTTPClient(base=API_BASE,
-                                 tor_mode=config.SOFASCORE_TOR_MODE)
+            # nessuna rotazione periodica Tor: il traffico fanta non deve
+            # distruggere i circuiti del pipeline principale (NEWNYM globali)
+            cl.http.no_rotate = True
             _CLIENT = cl
         return _CLIENT
+
+
+def _set_status(**fields):
+    try:
+        st = kv.read_json(STATUS_KEY)
+        st = st if isinstance(st, dict) else {}
+        st.update(fields)
+        kv.write_json(STATUS_KEY, st)
+    except Exception as e:
+        log.debug("fanta status write: %s", e)
+
+
+def index_status():
+    st = kv.read_json(STATUS_KEY)
+    return st if isinstance(st, dict) else {}
 
 
 def _season_id():
@@ -55,6 +68,8 @@ def _season_id():
         if _SEASON_ID is None:
             s = _client().resolve_season()
             _SEASON_ID = (s or {}).get("id")
+            if _SEASON_ID:
+                _set_status(season_id=_SEASON_ID)
         return _SEASON_ID
 
 
@@ -65,7 +80,7 @@ def _norm_pos(position):
 def build_index(store):
     """Indice giocatori di tutte le squadre Serie A. Cached 12h (kv).
     Le squadre sono richieste in parallelo (5 worker) per stare nei tempi
-    di una richiesta web anche a freddo (Sofascore via Tor)."""
+    anche con Tor: ogni tentativo può richiedere retry su 403 (WAF)."""
     cached = kv.read_json(INDEX_KEY)
     if isinstance(cached, dict) and cached.get("players") and \
             time.time() - (cached.get("t") or 0) < INDEX_TTL:
@@ -78,21 +93,28 @@ def build_index(store):
             teams.append((tid, name))
     if not teams:
         log.warning("fanta: nessuna squadra in standings")
+        _set_status(last_error="nessuna squadra in standings",
+                    last_ts=int(time.time()))
         return cached.get("players") if isinstance(cached, dict) else []
     cl = _client()
     players = []
+    errors = {}
     from concurrent.futures import ThreadPoolExecutor
 
     def _fetch(team):
         tid, tname = team
         try:
-            return tid, tname, cl.team_players(tid) or []
+            squad = cl.team_players(tid) or []
+            if not squad:
+                return tid, tname, [], "vuoto (403/timeout?)"
+            return tid, tname, squad, None
         except Exception as e:
-            log.warning("fanta: team_players(%s) fallita: %s", tid, e)
-            return tid, tname, []
+            return tid, tname, [], str(e)[:80]
 
     with ThreadPoolExecutor(max_workers=5) as pool:
-        for tid, tname, squad in pool.map(_fetch, teams):
+        for tid, tname, squad, err in pool.map(_fetch, teams):
+            if err:
+                errors[tname] = err
             for p in squad:
                 if not p.get("id"):
                     continue
@@ -103,10 +125,14 @@ def build_index(store):
                     "team": tname,
                     "team_id": tid,
                 })
+    now = int(time.time())
     if players:
-        kv.write_json(INDEX_KEY, {"t": int(time.time()), "players": players})
-        log.info("fanta: indice costruito (%d giocatori, %d squadre)",
-                 len(players), len(teams))
+        kv.write_json(INDEX_KEY, {"t": now, "players": players})
+        log.info("fanta: indice costruito (%d giocatori, %d/%d squadre)",
+                 len(players), len(teams) - len(errors), len(teams))
+    _set_status(last_ts=now, teams=len(teams),
+                teams_ok=len(teams) - len(errors),
+                players=len(players), errors=errors or None)
     return players
 
 
@@ -125,6 +151,7 @@ def ensure_index_async(store):
     with _build_lock:
         if not _building:
             _building = True
+            _set_status(building=True)
             threading.Thread(target=_build_safe, args=(store,),
                              daemon=True, name="fanta-index").start()
     return players or []
@@ -136,9 +163,11 @@ def _build_safe(store):
         build_index(store)
     except Exception as e:
         log.warning("fanta: build_index in background fallita: %s", e)
+        _set_status(last_error=str(e)[:120], last_ts=int(time.time()))
     finally:
         with _build_lock:
             _building = False
+            _set_status(building=False)
 
 
 def search(store, query, limit=15):

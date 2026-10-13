@@ -123,13 +123,17 @@ def create_app(store: Store, tunnel=None):
         """Autocomplete giocatori Serie A (indice Sofascore cached)."""
         from app.fanta import players as fplayers
         q = (request.args.get("q") or "").strip()
-        if len(q) < 2:
-            return jsonify({"players": []})
+        out = {"players": []}
+        if len(q) >= 2:
+            try:
+                out["players"] = fplayers.search(store, q, limit=12)
+            except Exception as e:
+                log.warning("fanta search: %s", e)
         try:
-            return jsonify({"players": fplayers.search(store, q, limit=12)})
-        except Exception as e:
-            log.warning("fanta search: %s", e)
-            return jsonify({"players": []})
+            out["index"] = fplayers.index_status()
+        except Exception:
+            pass
+        return jsonify(out)
 
     @app.get("/api/fanta/squad")
     def api_fanta_squad():
