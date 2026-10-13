@@ -1366,8 +1366,8 @@ class TelegramBot:
         st["op"] = "add"
         self._edit_or_send(
             chat_id, message_id,
-            "➕ Scrivi il nome del giocatore (es. <i>Lautaro</i>). "
-            "Riceverai i risultati da scegliere.", None)
+            "➕ Scrivi il cognome del giocatore (es. <i>Martinez</i>, "
+            "<i>Barella</i>). Riceverai i risultati da scegliere.", None)
 
     def _fanta_code_prompt(self, chat_id, message_id):
         _key, user = self._fanta_user(chat_id)

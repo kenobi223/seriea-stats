@@ -1046,7 +1046,7 @@ async function renderFanta() {
       <div class="kv" style="margin-top:10px"><b>Rosa (${rosa.length})</b></div>
       <div class="fanta-rosa">${rosaHtml}</div>
       <div class="fanta-add-row">
-        <input id="fanta-add" type="search" placeholder="Cerca giocatore (es. lautaro)…" autocomplete="off" style="padding-left:12px">
+        <input id="fanta-add" type="search" placeholder="Cerca per cognome (es. Martinez, Barella)…" autocomplete="off" style="padding-left:12px">
         <div id="fanta-ac" class="fanta-ac" hidden></div>
       </div>
       <div class="kv" style="margin-top:10px"><b>Formazione titolare</b></div>

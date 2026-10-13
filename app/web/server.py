@@ -1,6 +1,7 @@
 """Server web: dashboard + API JSON dello stato."""
 import logging
 import os
+import time
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -219,61 +220,22 @@ def create_app(store: Store, tunnel=None):
 
     @app.get("/api/fanta/debug")
     def api_fanta_debug():
-        """Diagnostica rosa Sofascore via Tor (solo con MAINTENANCE_TOKEN)."""
+        """Diagnostica indice fantacalcio.it (solo con MAINTENANCE_TOKEN)."""
         if request.args.get("token") != os.environ.get(
                 "MAINTENANCE_TOKEN", "test123"):
             return jsonify({"error": "token errato"}), 403
         from app.fanta import players as fplayers
-        out = {"index_cached": bool(kv.read_json("fanta_index.json") or {})}
-        # probe crudo dei due host via Tor (status code + body breve)
-        try:
-            import requests as _rq
-            proxies = {"http": config.TOR_SOCKS_PROXY,
-                       "https": config.TOR_SOCKS_PROXY}
-            headers = {"User-Agent": config.ASSETS_UA}
-            out["probes"] = {}
-            for host in ("https://www.sofascore.com/api/v1",
-                         "https://api.sofascore.com/api/v1"):
-                entry = {}
-                for path in ("/unique-tournament/23/seasons",
-                             "/team/110/players"):
-                    try:
-                        resp = _rq.get(host + path, headers=headers,
-                                       proxies=proxies, timeout=20)
-                        entry[path] = {"status": resp.status_code,
-                                       "body": resp.text[:180]}
-                    except Exception as e:
-                        entry[path] = {"err": str(e)[:100]}
-                out["probes"][host] = entry
-        except Exception as e:
-            out["probe_error"] = str(e)[:200]
-        try:
-            cl = fplayers._client()
-            teams = store.get("standings") or []
-            probe = teams[0] if teams else {}
-            tid = probe.get("team_id")
-            out["probe_team"] = probe.get("name")
-            out["probe_team_id"] = tid
-            if tid:
-                squad = cl.team_players(tid)
-                out["team_players_n"] = len(squad or [])
-                out["team_players_sample"] = (squad or [])[:2]
-                # shape grezzo (per diagnosi: presence di position/id)
-                raw = cl.http.get(f"team/{tid}/players") or {}
-                items = raw.get("players") or []
-                out["raw_n"] = len(items)
-                if items:
-                    out["raw_item_keys"] = sorted(items[0].keys())
-                    out["raw_player_keys"] = sorted(
-                        (items[0].get("player") or {}).keys())[:20]
-            sid = fplayers._season_id()
-            out["season_id"] = sid
-            if sid and (squad or []):
-                pid = squad[0].get("id")
-                out["stats"] = cl.player_season_stats(pid, sid)
-                out["ratings_n"] = len(cl.player_last_ratings(pid) or [])
-        except Exception as e:
-            out["error"] = str(e)[:300]
+        out = {"status": fplayers.index_status()}
+        cached = kv.read_json("fanta_index.json")
+        players = cached.get("players") if isinstance(cached, dict) else []
+        out["cached_n"] = len(players or [])
+        out["age_min"] = round((time.time() - (cached.get("t") or 0)) / 60, 1) \
+            if isinstance(cached, dict) and cached.get("t") else None
+        out["sample"] = (players or [])[:3]
+        roles = {}
+        for p in players or []:
+            roles[p.get("role")] = roles.get(p.get("role"), 0) + 1
+        out["roles"] = roles
         return jsonify(out)
 
     @app.get("/api/tracking-records")

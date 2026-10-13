@@ -1,50 +1,61 @@
-"""DB giocatori Serie A (Sofascore): indici, ricerca, statistiche cached.
+"""DB giocatori Serie A da fantacalcio.it (fonte ufficiale, dati fanta reali).
 
-L'indice giocatori viene costruito dalla rosa di ogni squadra (standings →
-team_players) e cachato in kv `fanta_index.json` (TTL 12h). Le statistiche
-singole (voto recente, gol, minuti) sono cachate in `fanta_stats.json`
-con TTL 24h per non martellare Sofascore.
+Una sola richiesta alla pagina statistiche fornisce per ogni calciatore:
+nome, ruolo classico (P/D/C/A), squadra, presenze (PV), media voto (MV),
+fantamedia (FM), gol, assist, ammonizioni, espulsioni. Niente Tor, niente
+API a pagamento: la pagina risponde in diretto.
+
+L'indice è cachato in kv `fanta_index.json` (TTL 6h). Le statistiche sono
+dentro l'indice stesso (nessuna chiamata per giocatore).
 """
 import logging
+import re
 import threading
 import time
 
-import config
+import requests
+
 from app.core import kv
 
 log = logging.getLogger("fanta.players")
 
-_CLIENT = None
-_client_lock = threading.Lock()
-_SEASON_ID = None
-_season_lock = threading.Lock()
-_building = False
-_build_lock = threading.Lock()
+STATS_URL = "https://www.fantacalcio.it/statistiche-serie-a"
 
 INDEX_KEY = "fanta_index.json"
-STATS_KEY = "fanta_stats.json"
 STATUS_KEY = "fanta_index_status.json"
-INDEX_TTL = 12 * 3600
-STATS_TTL = 24 * 3600
-MAX_STATS_CACHE = 800
+INDEX_TTL = 6 * 3600
 
-POS_MAP = {
-    "Goalkeeper": "P", "Defender": "D", "Midfielder": "C", "Attacker": "A",
-    "G": "P", "D": "D", "M": "C", "F": "A", "P": "P", "C": "C", "A": "A",
-}
+_build_lock = threading.Lock()
+_building = False
+_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                     "AppleWebKit/537.36 (KHTML, like Gecko) "
+                     "Chrome/120.0 Safari/537.36"}
+
+ROLE_MAP = {"p": "P", "d": "D", "c": "C", "a": "A"}
 
 
-def _client():
-    global _CLIENT
-    with _client_lock:
-        if _CLIENT is None:
-            from app.sources.sofascore import SofascoreClient
-            cl = SofascoreClient()
-            # nessuna rotazione periodica Tor: il traffico fanta non deve
-            # distruggere i circuiti del pipeline principale (NEWNYM globali)
-            cl.http.no_rotate = True
-            _CLIENT = cl
-        return _CLIENT
+def _fnum(value):
+    """'7,0' -> 7.0 ; '' -> None."""
+    if value is None:
+        return None
+    s = str(value).strip().replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _int(value):
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return 0
+
+
+def _team_from_slug(slug):
+    if not slug:
+        return "?"
+    return slug.replace("-", " ").strip().title()
 
 
 def _set_status(**fields):
@@ -62,86 +73,98 @@ def index_status():
     return st if isinstance(st, dict) else {}
 
 
-def _season_id():
-    global _SEASON_ID
-    with _season_lock:
-        if _SEASON_ID is None:
-            s = _client().resolve_season()
-            _SEASON_ID = (s or {}).get("id")
-            if _SEASON_ID:
-                _set_status(season_id=_SEASON_ID)
-        return _SEASON_ID
+def _fetch_html(url):
+    r = requests.get(url, headers=_UA, timeout=25)
+    r.raise_for_status()
+    return r.text
 
 
-def _norm_pos(position):
-    return POS_MAP.get(str(position or "").strip(), "?")
+def _parse(html):
+    """Estrae i giocatori dalla pagina statistiche fantacalcio.it."""
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    players = []
+    for tr in soup.find_all("tr", class_="player-row"):
+        try:
+            a = tr.find("a", class_="player-link")
+            if a is None:
+                continue
+            name_tag = a.find("span")
+            name = (name_tag or a).get_text(strip=True)
+            if not name:
+                continue
+            href = a.get("href") or ""
+            m = re.search(r"/squadre/([^/]+)/[^/]+/(\d+)", href)
+            team_slug = m.group(1) if m else ""
+            pid = int(m.group(2)) if m else None
+            th = tr.find("th", class_="player-role-classic")
+            role_val = ""
+            if th is not None:
+                span = th.find("span", class_="role")
+                role_val = (span.get("data-value") if span else "") or ""
+            role = ROLE_MAP.get(str(role_val).lower(), "?")
+            team_cell = tr.find("td", class_="player-team")
+            team_abbr = team_cell.get_text(strip=True) if team_cell else ""
+
+            def cell(cls):
+                td = tr.find("td", class_=cls)
+                return td.get_text(strip=True) if td else ""
+
+            players.append({
+                "id": pid if pid is not None else f"{name}-{team_abbr}",
+                "name": name,
+                "role": role,
+                "team": _team_from_slug(team_slug),
+                "team_abbr": team_abbr,
+                "pv": _int(cell("player-match-playeds")),
+                "mv": _fnum(cell("player-grade-avg")),
+                "fm": _fnum(cell("player-fanta-grade-avg")),
+                "goals": _int(cell("player-scoreds")),
+                "assists": _int(cell("player-assists")),
+                "yellows": _int(cell("player-yellows")),
+                "reds": _int(cell("player-reds")),
+            })
+        except Exception as e:
+            log.debug("fanta parse row: %s", e)
+    return players
 
 
-def build_index(store):
-    """Indice giocatori di tutte le squadre Serie A. Cached 12h (kv).
-    Le squadre sono richieste in parallelo (5 worker) per stare nei tempi
-    anche con Tor: ogni tentativo può richiedere retry su 403 (WAF)."""
+def build_index(store=None):
+    """Indice giocatori (una richiesta). Cached 6h in kv."""
     cached = kv.read_json(INDEX_KEY)
     if isinstance(cached, dict) and cached.get("players") and \
             time.time() - (cached.get("t") or 0) < INDEX_TTL:
         return cached["players"]
-    teams = []
-    for row in store.get("standings") or []:
-        tid = row.get("team_id")
-        name = row.get("name")
-        if tid and name:
-            teams.append((tid, name))
-    if not teams:
-        log.warning("fanta: nessuna squadra in standings")
-        _set_status(last_error="nessuna squadra in standings",
-                    last_ts=int(time.time()))
+    try:
+        html = _fetch_html(STATS_URL)
+        players = _parse(html)
+    except Exception as e:
+        log.warning("fanta: fetch fantacalcio.it fallita: %s", e)
+        _set_status(last_error=str(e)[:120], last_ts=int(time.time()))
         return cached.get("players") if isinstance(cached, dict) else []
-    cl = _client()
-    players = []
-    errors = {}
-    from concurrent.futures import ThreadPoolExecutor
-
-    def _fetch(team):
-        tid, tname = team
-        try:
-            squad = cl.team_players(tid) or []
-            if not squad:
-                return tid, tname, [], "vuoto (403/timeout?)"
-            return tid, tname, squad, None
-        except Exception as e:
-            return tid, tname, [], str(e)[:80]
-
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        for tid, tname, squad, err in pool.map(_fetch, teams):
-            if err:
-                errors[tname] = err
-            for p in squad:
-                if not p.get("id"):
-                    continue
-                players.append({
-                    "id": p["id"],
-                    "name": p.get("name") or "?",
-                    "role": _norm_pos(p.get("position")),
-                    "team": tname,
-                    "team_id": tid,
-                })
     now = int(time.time())
     if players:
         kv.write_json(INDEX_KEY, {"t": now, "players": players})
-        log.info("fanta: indice costruito (%d giocatori, %d/%d squadre)",
-                 len(players), len(teams) - len(errors), len(teams))
-    _set_status(last_ts=now, teams=len(teams),
-                teams_ok=len(teams) - len(errors),
-                players=len(players), errors=errors or None)
+        log.info("fanta: indice fantacalcio.it (%d giocatori)", len(players))
+    _set_status(last_ts=now, players=len(players), building=False,
+                source="fantacalcio.it")
     return players
 
 
-def ensure_index_async(store):
-    """Ritorna l'indice (cache o parziale) SENZA bloccare la richiesta.
+def _build_safe():
+    global _building
+    try:
+        build_index()
+    except Exception as e:
+        log.warning("fanta: build in background fallita: %s", e)
+    finally:
+        with _build_lock:
+            _building = False
 
-    Se la cache è assente/scaduta avvia la build in un thread separato
-    (single-flight): con Tor e rate-limit globale una build completa può
-    richiedere minuti, inaccettabili dentro una richiesta HTTP."""
+
+def ensure_index_async(store=None):
+    """Ritorna l'indice (cache) e, se assente, lo costruisce in background
+    (una singola richiesta veloce, quindi di fatto quasi sincrono)."""
     global _building
     cached = kv.read_json(INDEX_KEY)
     players = cached.get("players") if isinstance(cached, dict) else None
@@ -152,28 +175,13 @@ def ensure_index_async(store):
         if not _building:
             _building = True
             _set_status(building=True)
-            threading.Thread(target=_build_safe, args=(store,),
-                             daemon=True, name="fanta-index").start()
+            threading.Thread(target=_build_safe, daemon=True,
+                             name="fanta-index").start()
     return players or []
 
 
-def _build_safe(store):
-    global _building
-    try:
-        build_index(store)
-    except Exception as e:
-        log.warning("fanta: build_index in background fallita: %s", e)
-        _set_status(last_error=str(e)[:120], last_ts=int(time.time()))
-    finally:
-        with _build_lock:
-            _building = False
-            _set_status(building=False)
-
-
 def search(store, query, limit=15):
-    """Ricerca fuzzy-leggera per nome (o squadra). Punteggio: prefisso >
-    sottostringa > tutti i token presenti. Non blocca: se l'indice non
-    c'è ancora la build parte in background e qui si restituisce vuoto."""
+    """Ricerca locale per nome (o squadra). Prefisso > sottostringa > token."""
     q = str(query or "").strip().lower()
     if not q:
         return []
@@ -196,75 +204,21 @@ def search(store, query, limit=15):
     return [p for _, _, p in scored[:limit]]
 
 
-def enrich(player):
-    """Completa ruolo/squadra mancanti via player_detail (1 chiamata)."""
-    if not isinstance(player, dict) or player.get("id") is None:
-        return player
-    if player.get("role") and player.get("role") != "?" and player.get("team"):
-        return player
-    try:
-        detail = _client().player_detail(player["id"]) or {}
-        if detail.get("position"):
-            player["role"] = _norm_pos(detail["position"])
-        if detail.get("team"):
-            player["team"] = detail["team"]
-    except Exception as e:
-        log.debug("fanta: enrich(%s): %s", player.get("id"), e)
-    return player
+def get_by_id(pid):
+    """Statistiche del giocatore dall'indice (nessuna rete)."""
+    cached = kv.read_json(INDEX_KEY)
+    players = cached.get("players") if isinstance(cached, dict) else []
+    for p in players or []:
+        if p.get("id") == pid:
+            return p
+    return None
 
 
-def _load_stats_blob():
-    blob = kv.read_json(STATS_KEY)
-    return blob if isinstance(blob, dict) else {}
-
-
-def _prune(blob):
-    now = time.time()
-    items = [(k, v) for k, v in blob.items()
-             if isinstance(v, dict) and now - (v.get("t") or 0) < STATS_TTL]
-    items.sort(key=lambda kv_: -(kv_[1].get("t") or 0))
-    return {k: v for k, v in items[:MAX_STATS_CACHE]}
-
-
+# compatibilità col vecchio engine (Sofascore): le stats sono nell'indice
 def player_stats(pid):
-    """Statistiche fanta di un giocatore: voto recente, gol, minuti, infortunio."""
-    blob = _load_stats_blob()
-    hit = blob.get(str(pid))
-    if hit and time.time() - (hit.get("t") or 0) < STATS_TTL:
-        return hit.get("data")
-    cl = _client()
-    data = {"id": pid}
-    try:
-        detail = cl.player_detail(pid) or {}
-        data["name"] = detail.get("name")
-        data["team"] = detail.get("team")
-        data["position"] = _norm_pos(detail.get("position"))
-    except Exception as e:
-        log.debug("fanta: player_detail(%s): %s", pid, e)
-    try:
-        ratings = cl.player_last_ratings(pid) or []
-        vals = [r["rating"] for r in ratings[:8] if r.get("rating")]
-        data["ratings"] = vals
-        data["avg_rating"] = round(sum(vals) / len(vals), 2) if vals else None
-        if len(vals) >= 4:
-            recent = sum(vals[:3]) / 3
-            older = sum(vals[3:]) / len(vals[3:])
-            data["trend"] = "up" if recent > older + 0.15 else \
-                "down" if recent < older - 0.15 else "flat"
-        else:
-            data["trend"] = None
-    except Exception as e:
-        log.debug("fanta: player_last_ratings(%s): %s", pid, e)
-        data["ratings"] = []
-    try:
-        sid = _season_id()
-        if sid:
-            st = cl.player_season_stats(pid, sid) or {}
-            data.update({k: st.get(k) for k in
-                         ("appearances", "minutes", "goals", "assists",
-                          "total_shots", "rating")})
-    except Exception as e:
-        log.debug("fanta: player_season_stats(%s): %s", pid, e)
-    blob[str(pid)] = {"t": int(time.time()), "data": data}
-    kv.write_json(STATS_KEY, _prune(blob))
-    return data
+    return get_by_id(pid) or {"id": pid}
+
+
+def enrich(player):
+    """Nella nuova fonte ruolo/squadra sono già nell'indice: no-op."""
+    return player
