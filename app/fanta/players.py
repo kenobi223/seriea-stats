@@ -54,7 +54,9 @@ def _norm_pos(position):
 
 
 def build_index(store):
-    """Indice giocatori di tutte le squadre Serie A. Cached 12h (kv)."""
+    """Indice giocatori di tutte le squadre Serie A. Cached 12h (kv).
+    Le squadre sono richieste in parallelo (5 worker) per stare nei tempi
+    di una richiesta web anche a freddo (Sofascore via Tor)."""
     cached = kv.read_json(INDEX_KEY)
     if isinstance(cached, dict) and cached.get("players") and \
             time.time() - (cached.get("t") or 0) < INDEX_TTL:
@@ -70,22 +72,28 @@ def build_index(store):
         return cached.get("players") if isinstance(cached, dict) else []
     cl = _client()
     players = []
-    for tid, tname in teams:
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _fetch(team):
+        tid, tname = team
         try:
-            squad = cl.team_players(tid) or []
+            return tid, tname, cl.team_players(tid) or []
         except Exception as e:
             log.warning("fanta: team_players(%s) fallita: %s", tid, e)
-            continue
-        for p in squad:
-            if not p.get("id"):
-                continue
-            players.append({
-                "id": p["id"],
-                "name": p.get("name") or "?",
-                "role": _norm_pos(p.get("position")),
-                "team": tname,
-                "team_id": tid,
-            })
+            return tid, tname, []
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        for tid, tname, squad in pool.map(_fetch, teams):
+            for p in squad:
+                if not p.get("id"):
+                    continue
+                players.append({
+                    "id": p["id"],
+                    "name": p.get("name") or "?",
+                    "role": _norm_pos(p.get("position")),
+                    "team": tname,
+                    "team_id": tid,
+                })
     if players:
         kv.write_json(INDEX_KEY, {"t": int(time.time()), "players": players})
         log.info("fanta: indice costruito (%d giocatori, %d squadre)",
