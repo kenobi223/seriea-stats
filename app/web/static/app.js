@@ -839,6 +839,258 @@ async function renderCommunity() {
   }
 }
 
+// ------------------------------------------------------------------- fanta
+let fantaCode = localStorage.getItem("fanta_code") || "";
+let fantaSquad = null;
+let fantaReport = null;
+let fantaSuggest = null;
+let fantaErr = "";
+let fantaBusy = false;
+let fantaAcTimer = null;
+let fantaAcHits = [];
+
+const FANTA_MODULI = ["4-3-3", "4-4-2", "3-5-2", "4-2-3-1", "3-4-3"];
+const FANTA_ROLE = { P: "Portiere", D: "Difensore", C: "Centrocampista", A: "Attaccante" };
+
+async function fantaLoadSquad() {
+  if (!fantaCode) { fantaSquad = null; return; }
+  fantaErr = "";
+  try {
+    const res = await fetch(`/api/fanta/squad?code=${encodeURIComponent(fantaCode)}`);
+    if (!res.ok) {
+      fantaErr = ((await res.json()).error) || "errore";
+      fantaSquad = null;
+      return;
+    }
+    fantaSquad = await res.json();
+  } catch (e) {
+    fantaErr = "rete";
+    fantaSquad = null;
+  }
+}
+
+async function fantaSave(patch) {
+  if (!fantaSquad) return false;
+  try {
+    const res = await fetch("/api/fanta/squad", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: fantaCode, ...patch }),
+    });
+    if (res.ok) {
+      const j = await res.json();
+      if (patch.rosa !== undefined) fantaSquad.rosa = patch.rosa;
+      fantaSquad.modulo = j.modulo;
+      fantaSquad.mod_dif = j.mod_dif;
+      fantaSquad.xi = j.xi;
+      toast("Salvato ✓");
+      return true;
+    }
+    toast("Salvataggio fallito");
+    return false;
+  } catch (e) {
+    toast("Errore di rete");
+    return false;
+  }
+}
+
+function fantaCard(title, res) {
+  const rows = (res.xi || []).map(r => {
+    const arrow = r.trend === "up" ? "↑" : r.trend === "down" ? "↓" : "→";
+    const flags = (r.injured ? " 🚑" : "") + (r.mod_note ? " 🛡" : "");
+    const tit = r.tit !== null && r.tit !== undefined ? ` <span class="muted">· tit ${r.tit}%</span>` : "";
+    return `<div class="kv"><span>${esc(r.role)} <b>${esc(r.name)}</b><span class="muted"> · ${esc(r.team || "")}</span>${tit}</span><span><b>${r.score}</b> ${arrow}${flags}</span></div>`;
+  }).join("");
+  return `<div class="card"><div class="kv"><b>${esc(title)}</b><span class="chip">modulo ${esc(res.modulo)}${res.mod_dif ? " · mod dif" : ""}</span></div>
+    ${rows || '<div class="muted">Nessun giocatore.</div>'}
+    <div class="kv" style="margin-top:8px"><b>Media ponderata: ${res.total}</b><span class="chip">${esc(res.label || "")}</span></div></div>`;
+}
+
+async function fantaLink() {
+  const inp = document.getElementById("fanta-code-in");
+  const code = ((inp && inp.value) || "").trim().toLowerCase();
+  if (!code) { toast("Scrivi un codice"); return; }
+  const prev = fantaCode;
+  fantaCode = code;
+  fantaSquad = null;
+  fantaErr = "";
+  await fantaLoadSquad();
+  if (fantaSquad) {
+    localStorage.setItem("fanta_code", code);
+    fantaReport = null;
+    fantaSuggest = null;
+    toast("Rosa collegata ✓");
+  } else {
+    fantaCode = prev;
+    toast("Codice non trovato");
+  }
+  renderFanta();
+}
+
+async function fantaRun(kind) {
+  if (fantaBusy || !fantaCode) return;
+  fantaBusy = true;
+  renderFanta();
+  try {
+    const res = await fetch(`/api/fanta/${kind}?code=${encodeURIComponent(fantaCode)}`);
+    const data = await res.json();
+    if (kind === "report") fantaReport = data;
+    else fantaSuggest = data;
+  } catch (e) {
+    if (kind === "report") fantaReport = { error: "errore di rete" };
+    else fantaSuggest = { error: "errore di rete" };
+  }
+  fantaBusy = false;
+  renderFanta();
+}
+
+function fantaAcRender(hits) {
+  const box = document.getElementById("fanta-ac");
+  if (!box) return;
+  fantaAcHits = hits || [];
+  if (!fantaAcHits.length) { box.hidden = true; box.innerHTML = ""; return; }
+  box.innerHTML = fantaAcHits.map((p, i) =>
+    `<button type="button" data-i="${i}">${esc(p.name)} · ${esc(p.team)} [${esc(p.role)}]</button>`).join("");
+  box.hidden = false;
+  box.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const p = fantaAcHits[Number(btn.getAttribute("data-i"))];
+      if (!p) return;
+      const rosa = fantaSquad.rosa || [];
+      if (rosa.some(x => Number(x.id) === Number(p.id))) { toast("Già in rosa"); return; }
+      rosa.push(p);
+      fantaSave({ rosa });
+      const add = document.getElementById("fanta-add");
+      if (add) add.value = "";
+      box.hidden = true;
+      renderFanta();
+    });
+  });
+}
+
+async function renderFanta() {
+  const el = document.getElementById("tab-fanta");
+  if (!el) return;
+
+  if (!fantaCode) {
+    el.innerHTML = `<div class="section-title">⚽ Fanta — fantacalcio con voto reale</div>
+      ${stateBlock("Collega la tua rosa", "Crea la rosa e il codice dal bot Telegram (menu ⚽ Fanta → 🔑 Codice), poi inseriscilo qui per vedere la rosa, valutare la formazione e scoprire la consigliata.")}
+      <div class="card">
+        <div class="kv"><b>Codice personale</b><span class="muted">3-12 caratteri</span></div>
+        <div class="fanta-link-row">
+          <input id="fanta-code-in" type="text" maxlength="12" placeholder="es. miofanta1" autocomplete="off" style="padding-left:12px">
+          <button id="fanta-link" class="cta">Collega</button>
+        </div>
+      </div>`;
+    document.getElementById("fanta-link").addEventListener("click", fantaLink);
+    document.getElementById("fanta-code-in").addEventListener("keydown", e => { if (e.key === "Enter") fantaLink(); });
+    return;
+  }
+
+  if (!fantaSquad && !fantaErr) {
+    el.innerHTML = `<div class="section-title">⚽ Fanta</div>${renderSkeleton()}`;
+    await fantaLoadSquad();
+    renderFanta();
+    return;
+  }
+
+  if (fantaErr) {
+    el.innerHTML = `<div class="section-title">⚽ Fanta</div>
+      ${stateBlock("Codice non valido", `Il codice «${fantaCode}» non è stato trovato. Controllalo sul bot o chiedine uno nuovo.`)}`;
+    const btn = el.querySelector(".cta");
+    if (btn) btn.addEventListener("click", () => {
+      localStorage.removeItem("fanta_code");
+      fantaCode = ""; fantaSquad = null; fantaErr = "";
+      renderFanta();
+    });
+    return;
+  }
+
+  const s = fantaSquad;
+  const rosa = s.rosa || [];
+  const byId = {};
+  rosa.forEach(p => { byId[p.id] = p; });
+  const xiRoles = {};
+  (s.xi || []).forEach(pid => {
+    const p = byId[pid];
+    if (p) (xiRoles[p.role] = xiRoles[p.role] || []).push(p);
+  });
+
+  const rosaHtml = rosa.length
+    ? rosa.map(p => `<span class="chip">${esc(p.name)}<span class="muted"> · ${esc(p.team)}</span> [${esc(p.role)}]<button type="button" class="fanta-rm" data-pid="${esc(String(p.id))}" aria-label="Rimuovi ${esc(p.name)}">×</button></span>`).join("")
+    : `<div class="muted">Rosa vuota: cerca un giocatore qui sotto e aggiungilo.</div>`;
+
+  const xiHtml = (s.xi || []).length
+    ? Object.keys(xiRoles).map(r => `<div style="margin:2px 0"><b>${FANTA_ROLE[r] || esc(r)}:</b> ${xiRoles[r].map(p => esc(p.name)).join(", ")}</div>`).join("")
+    : `<div class="muted">Nessuna formazione scelta: la valutazione usa il miglior XI automatico. Per scegliere gli 11 titolari usa il bot (⚔️ Formazione titolare).</div>`;
+
+  const blocks = [];
+  if (fantaReport && fantaReport.error) blocks.push(`<div class="card">${esc(fantaReport.error)}</div>`);
+  else if (fantaReport) blocks.push(fantaCard("📋 Valutazione formazione", fantaReport));
+  if (fantaSuggest && fantaSuggest.error) blocks.push(`<div class="card">${esc(fantaSuggest.error)}</div>`);
+  else if (fantaSuggest) blocks.push(fantaCard("✨ Formazione consigliata", fantaSuggest));
+
+  el.innerHTML = `<div class="section-title">⚽ Fanta — codice <code>${esc(fantaCode)}</code></div>
+    <div class="card">
+      <div class="kv"><b>Impostazioni</b><span class="muted">salvataggio automatico</span></div>
+      <div class="fanta-row">
+        <label class="muted">Modulo
+          <select id="fanta-modulo" aria-label="Modulo">${FANTA_MODULI.map(m => `<option ${m === s.modulo ? "selected" : ""}>${m}</option>`).join("")}</select>
+        </label>
+        <label class="fanta-switch"><input type="checkbox" id="fanta-mdif" ${s.mod_dif ? "checked" : ""}> Mod difesa</label>
+      </div>
+      <div class="kv" style="margin-top:10px"><b>Rosa (${rosa.length})</b></div>
+      <div class="fanta-rosa">${rosaHtml}</div>
+      <div class="fanta-add-row">
+        <input id="fanta-add" type="search" placeholder="Cerca giocatore (es. lautaro)…" autocomplete="off" style="padding-left:12px">
+        <div id="fanta-ac" class="fanta-ac" hidden></div>
+      </div>
+      <div class="kv" style="margin-top:10px"><b>Formazione titolare</b></div>
+      <div>${xiHtml}</div>
+    </div>
+    <div class="fanta-actions">
+      <button id="fanta-rate" class="cta" ${fantaBusy ? "disabled" : ""}>${fantaBusy ? "⏳…" : "📋 Valuta"}</button>
+      <button id="fanta-sugg" class="ghost" ${fantaBusy ? "disabled" : ""}>✨ Consigliata</button>
+      <button id="fanta-unlink" class="ghost">🔑 Cambia codice</button>
+    </div>
+    ${blocks.join("")}`;
+
+  document.getElementById("fanta-modulo").addEventListener("change", e => {
+    fantaSave({ modulo: e.target.value });
+  });
+  document.getElementById("fanta-mdif").addEventListener("change", e => {
+    fantaSave({ mod_dif: e.target.checked });
+  });
+  el.querySelectorAll(".fanta-rm").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const pid = Number(btn.getAttribute("data-pid"));
+      const newRosa = (fantaSquad.rosa || []).filter(p => Number(p.id) !== pid);
+      fantaSave({ rosa: newRosa });
+      renderFanta();
+    });
+  });
+  const addInp = document.getElementById("fanta-add");
+  addInp.addEventListener("input", () => {
+    clearTimeout(fantaAcTimer);
+    const q = addInp.value.trim();
+    if (q.length < 2) { fantaAcRender([]); return; }
+    fantaAcTimer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/fanta/players?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        fantaAcRender(data.players || []);
+      } catch (e) { fantaAcRender([]); }
+    }, 300);
+  });
+  document.getElementById("fanta-rate").addEventListener("click", () => fantaRun("report"));
+  document.getElementById("fanta-sugg").addEventListener("click", () => fantaRun("suggest"));
+  document.getElementById("fanta-unlink").addEventListener("click", () => {
+    localStorage.removeItem("fanta_code");
+    fantaCode = ""; fantaSquad = null; fantaReport = null; fantaSuggest = null;
+    renderFanta();
+  });
+}
+
 // ------------------------------------------------------------- controls & init
 function renderActive() {
   const activeTab = document.querySelector("#tabs button.active");
@@ -863,6 +1115,7 @@ function renderActive() {
   else if (tabId === "ai") renderAI();
   else if (tabId === "schedina") renderSchedina();
   else if (tabId === "community") renderCommunity();
+  else if (tabId === "fanta") renderFanta();
   else if (tabId === "tracking") renderTracking();
 }
 

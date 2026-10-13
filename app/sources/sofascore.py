@@ -372,6 +372,91 @@ class SofascoreClient:
             })
         return out
 
+    # ------------------------------------------------------ rosa e giocatori
+    def team_players(self, team_id):
+        """Rosa di una squadra: id, nome, ruolo (Goalkeeper/Defender/...)."""
+        data = self.http.get(f"team/{team_id}/players")
+        if not data:
+            return []
+        out = []
+        for row in data.get("players", []):
+            p = row.get("player") or {}
+            if not p.get("id"):
+                continue
+            out.append({
+                "id": p.get("id"),
+                "name": p.get("name") or p.get("shortName"),
+                "position": p.get("position"),
+                "shirt": row.get("shirtNumber"),
+            })
+        return out
+
+    def player_detail(self, player_id):
+        """Scheda giocatore: posizione, squadra corrente, nazionalità."""
+        data = self.http.get(f"player/{player_id}")
+        p = (data or {}).get("player") or {}
+        team = p.get("team") or {}
+        country = p.get("country") or {}
+        return {
+            "id": p.get("id"),
+            "name": p.get("name") or p.get("shortName"),
+            "position": p.get("position"),
+            "team": team.get("name"),
+            "team_id": team.get("id"),
+            "country": country.get("name"),
+        }
+
+    def player_last_ratings(self, player_id):
+        """Ultime voto (Sofascore rating) del giocatore: andamento."""
+        data = self.http.get(f"player/{player_id}/last-ratings")
+        if not data:
+            return []
+        block = data.get("lastRatings") or {}
+        out = []
+        for r in (block.get("ratings") or [])[:15]:
+            rating = r.get("rating")
+            if rating is None:
+                continue
+            try:
+                rating = float(rating)
+            except (TypeError, ValueError):
+                continue
+            out.append({
+                "rating": rating,
+                "match_id": r.get("matchId"),
+                "ts": r.get("timestamp"),
+            })
+        return out
+
+    def player_season_stats(self, player_id, season_id):
+        """Statistiche stagione (presenze, minuti, gol, assist, media voto)."""
+        data = self.http.get(
+            f"player/{player_id}/unique-tournament/{config.TOURNAMENT_ID}"
+            f"/season/{season_id}/statistics/overall")
+        if not data:
+            return None
+        st = data.get("statistics") or {}
+        if isinstance(st, list):     # alcune risposte wrappano in lista
+            st = st[0] if st and isinstance(st[0], dict) else {}
+
+        def _num(key):
+            v = st.get(key)
+            if v in (None, ""):
+                return None
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        return {
+            "appearances": _num("appearances"),
+            "minutes": _num("minutesPlayed"),
+            "goals": _num("goals"),
+            "assists": _num("assists"),
+            "total_shots": _num("totalShots"),
+            "rating": _num("rating"),
+        }
+
     # ------------------------------------------------------------- quote 1X2
     def event_odds(self, event_id):
         out = []

@@ -38,6 +38,9 @@ KEYS = {
     "digest_sent.json": os.path.join(config.DATA_DIR, "digest_sent.json"),
     "donors.json": os.path.join(config.DATA_DIR, "donors.json"),
     "community.json": os.path.join(config.DATA_DIR, "community.json"),
+    "fanta.json": os.path.join(config.DATA_DIR, "fanta.json"),
+    "fanta_index.json": os.path.join(config.DATA_DIR, "fanta_index.json"),
+    "fanta_stats.json": os.path.join(config.DATA_DIR, "fanta_stats.json"),
 }
 
 

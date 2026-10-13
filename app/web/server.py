@@ -113,6 +113,102 @@ def create_app(store: Store, tunnel=None):
             return jsonify({"error": "already", "entry": entry}), 409
         return jsonify({"error": status}), 400
 
+    # ------------------------------------------------------------- fanta
+    def _fanta_code():
+        return (request.args.get("code") or
+                request.headers.get("X-Fanta-Code") or "")
+
+    @app.get("/api/fanta/players")
+    def api_fanta_players():
+        """Autocomplete giocatori Serie A (indice Sofascore cached)."""
+        from app.fanta import players as fplayers
+        q = (request.args.get("q") or "").strip()
+        if len(q) < 2:
+            return jsonify({"players": []})
+        try:
+            return jsonify({"players": fplayers.search(store, q, limit=12)})
+        except Exception as e:
+            log.warning("fanta search: %s", e)
+            return jsonify({"players": []})
+
+    @app.get("/api/fanta/squad")
+    def api_fanta_squad():
+        """Rosa + modulo + XI di un utente (via codice personale)."""
+        from app.fanta import store as fstore
+        code = _fanta_code()
+        if not code:
+            return jsonify({"error": "codice mancante"}), 400
+        _key, user = fstore.get_by_code(code)
+        if not user:
+            return jsonify({"error": "codice sconosciuto"}), 404
+        return jsonify({"modulo": user.get("modulo") or "4-4-2",
+                        "mod_dif": bool(user.get("mod_dif")),
+                        "rosa": user.get("rosa") or [],
+                        "xi": user.get("xi") or [],
+                        "code": user.get("code")})
+
+    @app.post("/api/fanta/squad")
+    def api_fanta_squad_save():
+        """Aggiorna rosa/modulo/mod dif/XI (solo utenti con codice valido)."""
+        from app.fanta import store as fstore
+        body = request.get_json(silent=True) or {}
+        code = str(body.get("code") or "").strip()
+        key, user = fstore.get_by_code(code)
+        if not user:
+            return jsonify({"error": "codice sconosciuto"}), 404
+        fields = {}
+        if body.get("modulo") in fstore.MODULI:
+            fields["modulo"] = body["modulo"]
+        if "mod_dif" in body:
+            fields["mod_dif"] = bool(body["mod_dif"])
+        if isinstance(body.get("rosa"), list):
+            rosa = []
+            for p in body["rosa"][:25]:
+                if isinstance(p, dict) and p.get("id") is not None:
+                    rosa.append({"id": p["id"],
+                                 "name": str(p.get("name") or "?"),
+                                 "team": str(p.get("team") or "?"),
+                                 "role": str(p.get("role") or "?")})
+            fields["rosa"] = rosa
+            fields["xi"] = [x for x in (user.get("xi") or [])
+                            if x in {p["id"] for p in rosa}]
+        if isinstance(body.get("xi"), list):
+            fields["xi"] = [x for x in body["xi"][:11] if x is not None]
+        user = fstore.upsert_user(key, **fields)
+        return jsonify({"ok": True, "rosa": len(user.get("rosa") or []),
+                        "modulo": user.get("modulo"),
+                        "mod_dif": bool(user.get("mod_dif")),
+                        "xi": user.get("xi") or []})
+
+    @app.get("/api/fanta/report")
+    def api_fanta_report():
+        """Valutazione della formazione titolare (o auto-best-XI)."""
+        from app.fanta import engine as fengine
+        from app.fanta import store as fstore
+        _key, user = fstore.get_by_code(_fanta_code())
+        if not user:
+            return jsonify({"error": "codice sconosciuto"}), 404
+        try:
+            return jsonify(fengine.evaluate(store, user))
+        except Exception as e:
+            log.warning("fanta evaluate: %s", e)
+            return jsonify({"error": str(e)[:200]}), 500
+
+    @app.get("/api/fanta/suggest")
+    def api_fanta_suggest():
+        """Formazione consigliata: miglior modulo + XI per la rosa."""
+        from app.fanta import engine as fengine
+        from app.fanta import store as fstore
+        _key, user = fstore.get_by_code(_fanta_code())
+        if not user:
+            return jsonify({"error": "codice sconosciuto"}), 404
+        try:
+            return jsonify(fengine.suggest(store, user,
+                                           bool(user.get("mod_dif"))))
+        except Exception as e:
+            log.warning("fanta suggest: %s", e)
+            return jsonify({"error": str(e)[:200]}), 500
+
     @app.get("/api/tracking-records")
     def api_tracking_records():
         """Record valutati dal tracker: pick/best-bet vs esito reale (debug)."""
