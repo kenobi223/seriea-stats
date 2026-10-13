@@ -844,6 +844,7 @@ let fantaCode = localStorage.getItem("fanta_code") || "";
 let fantaSquad = null;
 let fantaReport = null;
 let fantaSuggest = null;
+let fantaImportReport = null;
 let fantaErr = "";
 let fantaBusy = false;
 let fantaAcTimer = null;
@@ -944,8 +945,37 @@ async function fantaRun(kind) {
   renderFanta();
 }
 
-function fantaAcRender(hits) {
-  const box = document.getElementById("fanta-ac");
+async function fantaImport(file) {
+  if (!file) return;
+  if (!fantaCode) { toast("Collega prima il codice"); return; }
+  fantaBusy = true;
+  renderFanta();
+  try {
+    const text = await file.text();
+    const replace = confirm("Vuoi SOSTITUIRE la rosa attuale con quella del file?\n\nOK = sostituisci · Annulla = aggiungi ai giocatori già presenti");
+    const res = await fetch("/api/fanta/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: fantaCode, csv: text, replace }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      toast("Import fallito: " + (data.error || res.status));
+      fantaBusy = false;
+      renderFanta();
+      return;
+    }
+    fantaImportReport = data;
+    await fantaLoadSquad();
+    toast(`Importati ${data.imported} giocatori`);
+  } catch (e) {
+    toast("Errore import: " + e.message);
+  }
+  fantaBusy = false;
+  renderFanta();
+}
+
+function fantaAcRender(hits) {  const box = document.getElementById("fanta-ac");
   if (!box) return;
   fantaAcHits = hits || [];
   if (!fantaAcHits.length) {
@@ -972,8 +1002,23 @@ function fantaAcRender(hits) {
   });
 }
 
-async function renderFanta() {
-  const el = document.getElementById("tab-fanta");
+function fantaImportCard(rep) {
+  const amb = (rep.ambiguous || []).map(p =>
+    `<div>${esc(p.csv_name || p.name)} <span class="muted">→ ${esc(p.name)} ${esc(p.team)}? (aggiunto)</span></div>`).join("");
+  const miss = (rep.missing || []).map(p =>
+    `<div>${esc(p.name)} <span class="muted">${esc(p.team || "")} [${esc(p.role || "")}]</span></div>`).join("");
+  const extra = (amb ? `<div class="kv" style="margin-top:6px"><b>Ambigui</b></div>${amb}` : "")
+    + (miss ? `<div class="kv" style="margin-top:6px"><b>Non trovati</b><span class="muted">aggiungili a mano</span></div>${miss}` : "");
+  const okExtra = (rep.imported && !amb && !miss)
+    ? `<div class="muted">Tutti i giocatori riconosciuti 👍</div>` : "";
+  return `<div class="card">
+    <div class="kv"><b>📥 Import CSV</b><button type="button" class="fanta-rm" id="fanta-imp-close" aria-label="Chiudi">×</button></div>
+    <div class="kv"><span>Importati</span><b>${rep.imported}${rep.replace ? " (rosa sostituita)" : " (aggiunti)"}</b></div>
+    ${extra}${okExtra}
+  </div>`;
+}
+
+async function renderFanta() {  const el = document.getElementById("tab-fanta");
   if (!el) return;
 
   if (!fantaCode) {
@@ -1033,6 +1078,7 @@ async function renderFanta() {
   else if (fantaReport) blocks.push(fantaCard("📋 Valutazione formazione", fantaReport));
   if (fantaSuggest && fantaSuggest.error) blocks.push(`<div class="card">${esc(fantaSuggest.error)}</div>`);
   else if (fantaSuggest) blocks.push(fantaCard("✨ Formazione consigliata", fantaSuggest));
+  if (fantaImportReport) blocks.push(fantaImportCard(fantaImportReport));
 
   el.innerHTML = `<div class="section-title">⚽ Fanta — codice <code>${esc(fantaCode)}</code></div>
     <div class="card">
@@ -1055,9 +1101,23 @@ async function renderFanta() {
     <div class="fanta-actions">
       <button id="fanta-rate" class="cta" ${fantaBusy ? "disabled" : ""}>${fantaBusy ? "⏳…" : "📋 Valuta"}</button>
       <button id="fanta-sugg" class="ghost" ${fantaBusy ? "disabled" : ""}>✨ Consigliata</button>
+      <button id="fanta-import" class="ghost">📥 Importa CSV</button>
+      <input id="fanta-file" type="file" accept=".csv,text/csv" hidden>
       <button id="fanta-unlink" class="ghost">🔑 Cambia codice</button>
     </div>
     ${blocks.join("")}`;
+
+  const importBtn = document.getElementById("fanta-import");
+  const fileInput = document.getElementById("fanta-file");
+  if (importBtn && fileInput) {
+    importBtn.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", () => fantaImport(fileInput.files[0]));
+  }
+  const impClose = document.getElementById("fanta-imp-close");
+  if (impClose) impClose.addEventListener("click", () => {
+    fantaImportReport = null;
+    renderFanta();
+  });
 
   document.getElementById("fanta-modulo").addEventListener("change", e => {
     fantaSave({ modulo: e.target.value });

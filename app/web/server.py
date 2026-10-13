@@ -218,6 +218,56 @@ def create_app(store: Store, tunnel=None):
             log.warning("fanta suggest: %s", e)
             return jsonify({"error": str(e)[:200]}), 500
 
+    @app.post("/api/fanta/import")
+    def api_fanta_import():
+        """Importa la rosa da un CSV di Leghe Fantacalcio.
+
+        Body: {"code": "...", "csv": "<testo del file>", "replace": bool}.
+        Abbina i giocatori all'indice fantacalcio.it e salva i riconosciuti.
+        """
+        from app.fanta import importer
+        from app.fanta import players as fplayers
+        from app.fanta import store as fstore
+        body = request.get_json(silent=True) or {}
+        code = str(body.get("code") or "").strip()
+        key, user = fstore.get_by_code(code)
+        if not user:
+            return jsonify({"error": "codice sconosciuto"}), 404
+        raw = body.get("csv")
+        if not raw:
+            return jsonify({"error": "csv mancante"}), 400
+        if isinstance(raw, list):
+            raw = "\n".join(str(x) for x in raw)
+        try:
+            rows, meta = importer.parse_csv(raw)
+        except Exception as e:
+            return jsonify({"error": f"parse: {str(e)[:120]}"}), 400
+        index = fplayers.ensure_index_async(store)
+        if not index:
+            return jsonify({"error": "indice giocatori in costruzione, "
+                                     "riprova tra qualche secondo"}), 503
+        res = importer.import_rows(rows, index)
+        replace = bool(body.get("replace"))
+        add = res["matched"]
+        if replace:
+            rosa = list(add)
+        else:
+            rosa = list(user.get("rosa") or [])
+            have = {p.get("id") for p in rosa}
+            for p in add:
+                if p["id"] not in have:
+                    rosa.append({"id": p["id"], "name": p["name"],
+                                 "team": p["team"], "role": p["role"]})
+        fields = {"rosa": rosa,
+                  "xi": [x for x in (user.get("xi") or [])
+                         if x in {p["id"] for p in rosa}]}
+        fstore.upsert_user(key, **fields)
+        return jsonify({
+            "ok": True, "imported": len(add),
+            "ambiguous": res["ambiguous"], "missing": res["missing"],
+            "rosa": len(rosa), "replace": replace, "meta": meta,
+        })
+
     @app.get("/api/fanta/debug")
     def api_fanta_debug():
         """Diagnostica indice fantacalcio.it (solo con MAINTENANCE_TOKEN)."""

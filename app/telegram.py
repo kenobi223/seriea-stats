@@ -1321,9 +1321,11 @@ class TelegramBot:
                 f"Rosa: {rosa_n} giocatori · Modulo: {modulo} · "
                 f"Mod dif: {mdif}\n"
                 f"Codice sito: <code>{_h(code)}</code>\n\n"
-                "Classico fantacalcio con voto reale Sofascore: titolarità, "
-                "andamento e agenda. La formazione consigliata ti propone il "
-                "miglior undici della tua rosa.")
+                "Classico fantacalcio con voti reali (fantacalcio.it): "
+                "fantamedia, titolarità e agenda. La formazione consigliata "
+                "ti propone il miglior undici della tua rosa.\n\n"
+                "📥 Puoi anche mandarmi il <b>.csv</b> esportato da Leghe "
+                "Fantacalcio: importo la rosa da solo.")
         rows = [
             [("🌹 Rosa", "f:rosa"), ("📋 Valuta XI", "f:rate")],
             [("✨ Consigliata", "f:sugg"), ("🧩 Modulo", "f:mod")],
@@ -1689,6 +1691,73 @@ class TelegramBot:
         self._send(chat_id, "✅ Formazione consigliata salvata come "
                             "titolare.")
 
+    def _fanta_document(self, chat_id, doc):
+        """Import rosa da un .csv inviato in chat (scarica via getFile)."""
+        filename = (doc.get("file_name") or "").lower()
+        if not filename.endswith(".csv") and doc.get("mime_type") not in (
+                "text/csv", "application/vnd.ms-excel",
+                "text/comma-separated-values"):
+            self._send(chat_id, "📥 Mandami il file <b>.csv</b> esportato da "
+                                 "Leghe Fantacalcio (Rosa → esporta).")
+            return
+        file_id = doc.get("file_id")
+        info = self._call("getFile", {"file_id": file_id})
+        if not info or not info.get("file_path"):
+            self._send(chat_id, "❌ Non riesco a scaricare il file.")
+            return
+        url = f"https://api.telegram.org/file/bot{self.token}/{info['file_path']}"
+        try:
+            r = requests.get(url, timeout=30)
+            r.raise_for_status()
+            raw = r.content
+        except Exception as e:
+            self._send(chat_id, f"❌ Download fallito: {_h(e)}")
+            return
+
+        from app.fanta import importer
+        from app.fanta import players as fplayers
+        from app.fanta import store as fstore
+        rows, meta = importer.parse_csv(raw)
+        if not rows:
+            self._send(chat_id, "❌ CSV vuoto o non leggibile. "
+                                 f"({_h(meta.get('error') or 'nessuna riga')})")
+            return
+        self._send(chat_id, f"📥 Lette {len(rows)} righe, riconosco i "
+                             "giocatori…")
+        index = fplayers.ensure_index_async(self.store)
+        if not index:
+            self._send(chat_id, "⚠️ Indice giocatori in costruzione, "
+                                 "riprova tra qualche secondo e rimanda il file.")
+            return
+        res = importer.import_rows(rows, index)
+        key, user = self._fanta_user(chat_id)
+        rosa = list(user.get("rosa") or [])
+        have = {p.get("id") for p in rosa}
+        for p in res["matched"]:
+            if p["id"] not in have:
+                rosa.append({"id": p["id"], "name": p["name"],
+                             "team": p["team"], "role": p["role"]})
+        fstore.upsert_user(key, rosa=rosa,
+                           xi=[x for x in (user.get("xi") or [])
+                               if x in {p["id"] for p in rosa}])
+        lines = [f"✅ Importati <b>{len(res['matched'])}</b> giocatori "
+                 f"(rosa ora: {len(rosa)})."]
+        if res["ambiguous"]:
+            lines.append(f"\n⚠️ <b>Ambigui</b> ({len(res['ambiguous'])}):")
+            for p in res["ambiguous"][:8]:
+                lines.append(f"• {_h(p.get('csv_name'))} → {_h(p['name'])} "
+                             f"({_h(p['team'])})")
+        if res["missing"]:
+            lines.append(f"\n🚫 <b>Non trovati</b> ({len(res['missing'])}) — "
+                         "aggiungili a mano:")
+            for p in res["missing"][:10]:
+                lines.append(f"• {_h(p.get('name'))} "
+                             f"[{_h(p.get('role'))}]")
+        self._send(chat_id, "\n".join(lines),
+                   _kb([[("🌹 Vedi rosa", "f:rosa"),
+                         ("📋 Valuta", "f:rate")],
+                        [("⬅️ Fanta", "f:home")]]))
+
     def _fanta_callback(self, chat_id, message_id, rest):
         if rest in ("home", ""):
             self._fanta_home(chat_id, message_id)
@@ -1940,6 +2009,15 @@ class TelegramBot:
 
         if not self._authorized(chat_id):
             log.info("Telegram: chat %s non autorizzata", chat_id)
+            return
+
+        doc = msg.get("document") or {}
+        if doc:
+            try:
+                self._fanta_document(chat_id, doc)
+            except Exception as e:
+                log.error("Telegram: import documento fallito: %s", e)
+                self._send(chat_id, f"❌ Import fallito: {_h(e)}")
             return
 
         text = (msg.get("text") or "").strip()
