@@ -305,11 +305,11 @@ def run_cycle(store):
     except Exception as e:
         log.debug("digest automatici falliti: %s", e)
 
-    # ---- indice giocatori fanta: precaricato qui (no-op se cache <12h)
-    #      così la prima ricerca sul sito/bot non attende 20 richieste Tor
+    # ---- indice giocatori fanta: precaricato qui in background (no-op se
+    #      cache <12h) così la prima ricerca sul sito/bot è già pronta
     try:
         from app.fanta import players as fanta_players
-        fanta_players.build_index(store)
+        fanta_players.ensure_index_async(store)
     except Exception as e:
         log.debug("fanta build_index fallita: %s", e)
 

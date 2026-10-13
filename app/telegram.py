@@ -1392,7 +1392,10 @@ class TelegramBot:
             st["hits"] = hits
             if not hits:
                 self._send(chat_id, f"Nessun giocatore trovato per "
-                                     f"«{_h(text)}». Prova un altro nome.")
+                                     f"«{_h(text)}». Prova un altro nome — "
+                                     "se è la prima volta l'indice potrebbe "
+                                     "ancora essere in costruzione: "
+                                     "riprova tra un minuto.")
                 return
             rows = [[(f"{p['name']} · {p['team']} [{p['role']}]",
                       f"f:pick:{p['id']}")] for p in hits]
@@ -1425,7 +1428,7 @@ class TelegramBot:
         player = next((p for p in (st.get("hits") or [])
                        if p.get("id") == pid), None)
         if player is None:
-            for p in fplayers.build_index(self.store):
+            for p in fplayers.ensure_index_async(self.store):
                 if p.get("id") == pid:
                     player = p
                     break

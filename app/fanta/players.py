@@ -18,6 +18,8 @@ _CLIENT = None
 _client_lock = threading.Lock()
 _SEASON_ID = None
 _season_lock = threading.Lock()
+_building = False
+_build_lock = threading.Lock()
 
 INDEX_KEY = "fanta_index.json"
 STATS_KEY = "fanta_stats.json"
@@ -101,13 +103,45 @@ def build_index(store):
     return players
 
 
+def ensure_index_async(store):
+    """Ritorna l'indice (cache o parziale) SENZA bloccare la richiesta.
+
+    Se la cache è assente/scaduta avvia la build in un thread separato
+    (single-flight): con Tor e rate-limit globale una build completa può
+    richiedere minuti, inaccettabili dentro una richiesta HTTP."""
+    global _building
+    cached = kv.read_json(INDEX_KEY)
+    players = cached.get("players") if isinstance(cached, dict) else None
+    fresh = players and time.time() - (cached.get("t") or 0) < INDEX_TTL
+    if fresh:
+        return players
+    with _build_lock:
+        if not _building:
+            _building = True
+            threading.Thread(target=_build_safe, args=(store,),
+                             daemon=True, name="fanta-index").start()
+    return players or []
+
+
+def _build_safe(store):
+    global _building
+    try:
+        build_index(store)
+    except Exception as e:
+        log.warning("fanta: build_index in background fallita: %s", e)
+    finally:
+        with _build_lock:
+            _building = False
+
+
 def search(store, query, limit=15):
     """Ricerca fuzzy-leggera per nome (o squadra). Punteggio: prefisso >
-    sottostringa > tutti i token presenti."""
+    sottostringa > tutti i token presenti. Non blocca: se l'indice non
+    c'è ancora la build parte in background e qui si restituisce vuoto."""
     q = str(query or "").strip().lower()
     if not q:
         return []
-    players = build_index(store)
+    players = ensure_index_async(store)
     tokens = [t for t in q.split() if t]
     scored = []
     for p in players:

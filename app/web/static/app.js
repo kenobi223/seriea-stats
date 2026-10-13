@@ -948,7 +948,11 @@ function fantaAcRender(hits) {
   const box = document.getElementById("fanta-ac");
   if (!box) return;
   fantaAcHits = hits || [];
-  if (!fantaAcHits.length) { box.hidden = true; box.innerHTML = ""; return; }
+  if (!fantaAcHits.length) {
+    box.innerHTML = `<div style="padding:9px 12px;font-size:12.5px" class="muted">Nessun risultato — se è la prima volta l'indice potrebbe essere in costruzione, riprova tra un minuto.</div>`;
+    box.hidden = false;
+    return;
+  }
   box.innerHTML = fantaAcHits.map((p, i) =>
     `<button type="button" data-i="${i}">${esc(p.name)} · ${esc(p.team)} [${esc(p.role)}]</button>`).join("");
   box.hidden = false;
