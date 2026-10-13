@@ -221,6 +221,28 @@ def create_app(store: Store, tunnel=None):
             return jsonify({"error": "token errato"}), 403
         from app.fanta import players as fplayers
         out = {"index_cached": bool(kv.read_json("fanta_index.json") or {})}
+        # probe crudo dei due host via Tor (status code + body breve)
+        try:
+            import requests as _rq
+            proxies = {"http": config.TOR_SOCKS_PROXY,
+                       "https": config.TOR_SOCKS_PROXY}
+            headers = {"User-Agent": config.ASSETS_UA}
+            out["probes"] = {}
+            for host in ("https://www.sofascore.com/api/v1",
+                         "https://api.sofascore.com/api/v1"):
+                entry = {}
+                for path in ("/unique-tournament/23/seasons",
+                             "/team/110/players"):
+                    try:
+                        resp = _rq.get(host + path, headers=headers,
+                                       proxies=proxies, timeout=20)
+                        entry[path] = {"status": resp.status_code,
+                                       "body": resp.text[:180]}
+                    except Exception as e:
+                        entry[path] = {"err": str(e)[:100]}
+                out["probes"][host] = entry
+        except Exception as e:
+            out["probe_error"] = str(e)[:200]
         try:
             cl = fplayers._client()
             teams = store.get("standings") or []
