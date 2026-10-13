@@ -505,26 +505,49 @@ function renderTracking() {
   const cal = state.data.calibration || {};
   const rate = t.bets_rate != null ? (t.bets_rate * 100).toFixed(0) + "%" : "—";
   const brier = t.brier != null ? t.brier.toFixed(3) : "—";
+  const pRate = t.picks_rate != null ? (t.picks_rate * 100).toFixed(0) + "%" : "—";
+  const bCls = t.bets_rate >= 0.5 ? "v" : "warn";
 
   let html = `<div class="section-title">Onestà del modello · quanto i pronostici diventano realtà</div>
     <div class="grid3">
       <div class="card"><div class="big-num">${t.evaluated || 0}</div>
         <div class="muted">partite valutate a fine gara</div></div>
-      <div class="card hit-card" role="button" tabindex="0" onclick="toggleHits(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleHits(this)}"><div class="big-num">${t.bets_hit || 0}/${t.bets_total || 0}</div>
-        <div class="muted">pronostici indovinati (${rate}) · clicca per i dettagli</div></div>
+      <div class="card"><div class="big-num">${t.picks_hit || 0}/${t.picks_total || 0}</div>
+        <div class="muted">pronostici del modello centrati (${pRate})</div></div>
       <div class="card"><div class="big-num">${brier}</div>
         <div class="muted">Brier score · più basso = più onesto</div></div>
     </div>
     <div id="hit-detail"></div>`;
+
+  // pronostici per mercato: il voto vero del modello (un pick per mercato)
+  const pbm = t.picks_by_market || {};
+  if (Object.values(pbm).some(st => st.picks_total)) {
+    html += `<div class="card"><div class="section-title st-flush">Pronostici del modello per mercato</div>`;
+    for (const [m, st] of Object.entries(pbm)) {
+      if (!st.picks_total) continue;
+      const cls = st.picks_rate >= 0.5 ? "v" : "warn";
+      html += `<div class="kv"><span class="muted kv-label">${MARKET_LABEL[m] || m}</span>
+        <span class="chip ${cls}">${st.picks_hit}/${st.picks_total} (${(st.picks_rate * 100).toFixed(0)}%)</span></div>`;
+    }
+    html += `<div class="muted tight">Un pronostico per mercato su ogni partita valutata: è il risultato che conta.</div></div>`;
+  }
+
+  // best-bet: la scommessa consigliata con quota (quote alte → hit basso)
+  if (t.bets_total) {
+    html += `<div class="card hit-card" role="button" tabindex="0" onclick="toggleHits(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleHits(this)}"><div class="kv">
+        <span class="muted kv-label">Best-bet suggeriti (scommesse con quota)</span>
+        <span class="chip ${bCls}">${t.bets_hit || 0}/${t.bets_total} (${rate})</span></div>
+      <div class="muted tight">Quote alte (1.1–6.5): qui conta più il ROI della percentuale · clicca per i dettagli</div></div>`;
+  }
 
   // conteggio per PARTITA (una partita può avere più best-bet/vincere in + mercati)
   if (t.match_bets_total) {
     const mRate = t.match_bets_rate != null ? (t.match_bets_rate * 100).toFixed(0) + "%" : "—";
     const mCls = t.match_bets_rate >= 0.5 ? "v" : "warn";
     html += `<div class="card"><div class="kv">
-        <span class="muted kv-label">Partite con pronostico vinto</span>
+        <span class="muted kv-label">Partite con best-bet vinto</span>
         <span class="chip ${mCls}">${t.match_bets_hit || 0}/${t.match_bets_total} (${mRate})</span></div>
-      <div class="muted tight">Conteggio per partita: azzeccata quando almeno un best-bet è stato centrato (il totale sopra è per singolo pronostico).</div></div>`;
+      <div class="muted tight">Conteggio per partita: azzeccata quando almeno un best-bet è stato centrato (il totale qui sopra è per singolo best-bet).</div></div>`;
   }
 
   const bins = t.calibration_bins || [];
@@ -637,7 +660,7 @@ async function toggleHits(card) {
   card.classList.toggle("open");
   const box = document.getElementById("hit-detail");
   const wantOpen = card.classList.contains("open");
-  box.innerHTML = wantOpen ? `<div class="muted">Carico i pronostici indovinati…</div>` : "";
+  box.innerHTML = wantOpen ? `<div class="muted">Carico i best-bet…</div>` : "";
   if (!wantOpen || hitsLoaded) return;
   hitsLoaded = true;
   try {
@@ -646,19 +669,20 @@ async function toggleHits(card) {
     const rows = [];
     for (const rec of data.records || []) {
       for (const h of rec.hits || []) {
-        if (!h.hit) continue;
+        if (h.model) continue; // solo i best-bet, non i pick del modello
         rows.push({ ...h, home: rec.home, away: rec.away, score: rec.score, round: rec.round });
       }
     }
     if (!rows.length) {
-      box.innerHTML = `<div class="card muted">Nessun pronostico indovinato.</div>`;
+      box.innerHTML = `<div class="card muted">Nessun best-bet registrato.</div>`;
       return;
     }
-    box.innerHTML = `<div class="card"><div class="section-title st-flush">Pronostici indovinati (${rows.length})</div>` +
+    const wins = rows.filter(x => x.hit).length;
+    box.innerHTML = `<div class="card"><div class="section-title st-flush">Best-bet suggeriti (${wins}/${rows.length} centrati)</div>` +
       rows.map(h => `<div class="kv"><span><b>${esc(h.home)} - ${esc(h.away)}</b>
         <span class="muted">(${esc(h.score)} · gj ${esc(h.round || "?")})</span></span>
-        <span><span class="chip v">${pickLabel(h.market, h.pick)}</span>
-        lo davo al ${((h.prob || 0) * 100).toFixed(0)}% @ ${fmtOdds(h.odds)}</span></div>`).join("") +
+        <span><span class="chip ${h.hit ? "v" : "warn"}">${h.hit ? "✓" : "✗"} ${pickLabel(h.market, h.pick)}</span>
+        prob ${((h.prob || 0) * 100).toFixed(0)}% @ ${fmtOdds(h.odds)}</span></div>`).join("") +
       `</div>`;
   } catch (e) {
     box.innerHTML = `<div class="card muted">Errore nel caricamento dei dettagli.</div>`;

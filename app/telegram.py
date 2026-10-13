@@ -268,11 +268,11 @@ def _tracking_text(tr, tracking):
                                pct=tracking["match_bets_rate"] * 100))
         for m, st in sorted((tracking.get("by_market") or {}).items()):
             if st.get("bets_total"):
-                lines.append(f"· {_market_label(tr, m)}: "
+                lines.append(f"· Best-bet {_market_label(tr, m)}: "
                              f"{st['bets_hit']}/{st['bets_total']} "
                              f"({st['bets_rate'] * 100:.0f}%)")
         if tracking.get("picks_total"):
-            lines.append(f"· Pronostico modello (1X2/Over/BTTS): "
+            lines.append(f"· Pronostici modello (1X2/Over/BTTS): "
                          f"{tracking['picks_hit']}/{tracking['picks_total']} "
                          f"({tracking['picks_rate'] * 100:.0f}%)")
     if tracking.get("brier") is not None:

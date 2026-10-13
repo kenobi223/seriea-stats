@@ -655,9 +655,10 @@ def analyze():
     conclusions = []
     if tracking["bets_rate"] is not None:
         conclusions.append(
-            f"Ho indovinato {tracking['bets_hit']} pronostici su "
-            f"{tracking['bets_total']} valutati "
-            f"({tracking['bets_rate'] * 100:.0f}%).")
+            f"Best-bet (scommesse con quota): {tracking['bets_hit']} su "
+            f"{tracking['bets_total']} centrati "
+            f"({tracking['bets_rate'] * 100:.0f}%) — quote alte, qui conta "
+            f"più il ROI della percentuale.")
     lbl = {"1x2": "risultato 1X2", "over_under": "Over/Under 2.5",
            "btts": "entrambe le squadre a segno"}
     for m in MARKETS:
@@ -665,7 +666,7 @@ def analyze():
         if not st["bets_total"]:
             continue
         conclusions.append(
-            f"Nel mercato {lbl[m]} sono {st['bets_hit']}/{st['bets_total']} "
+            f"Best-bet su {lbl[m]}: {st['bets_hit']}/{st['bets_total']} "
             f"({st['bets_rate'] * 100:.0f}%).")
     for m in MARKETS:
         st = picks_by_market[m]
