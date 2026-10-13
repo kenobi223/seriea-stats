@@ -209,6 +209,35 @@ def create_app(store: Store, tunnel=None):
             log.warning("fanta suggest: %s", e)
             return jsonify({"error": str(e)[:200]}), 500
 
+    @app.get("/api/fanta/debug")
+    def api_fanta_debug():
+        """Diagnostica rosa Sofascore via Tor (solo con MAINTENANCE_TOKEN)."""
+        if request.args.get("token") != os.environ.get(
+                "MAINTENANCE_TOKEN", "test123"):
+            return jsonify({"error": "token errato"}), 403
+        from app.fanta import players as fplayers
+        out = {"index_cached": bool(kv.read_json("fanta_index.json") or {})}
+        try:
+            cl = fplayers._client()
+            teams = store.get("standings") or []
+            probe = teams[0] if teams else {}
+            tid = probe.get("team_id")
+            out["probe_team"] = probe.get("name")
+            out["probe_team_id"] = tid
+            if tid:
+                squad = cl.team_players(tid)
+                out["team_players_n"] = len(squad or [])
+                out["team_players_sample"] = (squad or [])[:2]
+            sid = fplayers._season_id()
+            out["season_id"] = sid
+            if sid and (squad or []):
+                pid = squad[0].get("id")
+                out["stats"] = cl.player_season_stats(pid, sid)
+                out["ratings_n"] = len(cl.player_last_ratings(pid) or [])
+        except Exception as e:
+            out["error"] = str(e)[:300]
+        return jsonify(out)
+
     @app.get("/api/tracking-records")
     def api_tracking_records():
         """Record valutati dal tracker: pick/best-bet vs esito reale (debug)."""
