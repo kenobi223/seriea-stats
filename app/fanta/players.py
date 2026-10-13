@@ -26,6 +26,9 @@ STATS_KEY = "fanta_stats.json"
 INDEX_TTL = 12 * 3600
 STATS_TTL = 24 * 3600
 MAX_STATS_CACHE = 800
+# base alternativa: www.sofascore.com è dietro Akamai WAF e risponde 403 su
+# alcuni path (team/{id}/players); api.sofascore.com espone la stessa API v1
+API_BASE = "https://api.sofascore.com/api/v1"
 
 POS_MAP = {
     "Goalkeeper": "P", "Defender": "D", "Midfielder": "C", "Attacker": "A",
@@ -37,8 +40,12 @@ def _client():
     global _CLIENT
     with _client_lock:
         if _CLIENT is None:
+            from app.core.http import HTTPClient
             from app.sources.sofascore import SofascoreClient
-            _CLIENT = SofascoreClient()
+            cl = SofascoreClient()
+            cl.http = HTTPClient(base=API_BASE,
+                                 tor_mode=config.SOFASCORE_TOR_MODE)
+            _CLIENT = cl
         return _CLIENT
 
 
@@ -158,6 +165,23 @@ def search(store, query, limit=15):
             scored.append((score, len(name), p))
     scored.sort(key=lambda x: (-x[0], x[1], x[2].get("name") or ""))
     return [p for _, _, p in scored[:limit]]
+
+
+def enrich(player):
+    """Completa ruolo/squadra mancanti via player_detail (1 chiamata)."""
+    if not isinstance(player, dict) or player.get("id") is None:
+        return player
+    if player.get("role") and player.get("role") != "?" and player.get("team"):
+        return player
+    try:
+        detail = _client().player_detail(player["id"]) or {}
+        if detail.get("position"):
+            player["role"] = _norm_pos(detail["position"])
+        if detail.get("team"):
+            player["team"] = detail["team"]
+    except Exception as e:
+        log.debug("fanta: enrich(%s): %s", player.get("id"), e)
+    return player
 
 
 def _load_stats_blob():

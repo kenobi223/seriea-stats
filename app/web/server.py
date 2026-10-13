@@ -162,13 +162,17 @@ def create_app(store: Store, tunnel=None):
         if "mod_dif" in body:
             fields["mod_dif"] = bool(body["mod_dif"])
         if isinstance(body.get("rosa"), list):
+            from app.fanta import players as fplayers
             rosa = []
             for p in body["rosa"][:25]:
                 if isinstance(p, dict) and p.get("id") is not None:
-                    rosa.append({"id": p["id"],
-                                 "name": str(p.get("name") or "?"),
-                                 "team": str(p.get("team") or "?"),
-                                 "role": str(p.get("role") or "?")})
+                    entry = {"id": p["id"],
+                             "name": str(p.get("name") or "?"),
+                             "team": str(p.get("team") or "?"),
+                             "role": str(p.get("role") or "?")}
+                    if entry["role"] == "?" or entry["team"] == "?":
+                        fplayers.enrich(entry)
+                    rosa.append(entry)
             fields["rosa"] = rosa
             fields["xi"] = [x for x in (user.get("xi") or [])
                             if x in {p["id"] for p in rosa}]
@@ -228,6 +232,14 @@ def create_app(store: Store, tunnel=None):
                 squad = cl.team_players(tid)
                 out["team_players_n"] = len(squad or [])
                 out["team_players_sample"] = (squad or [])[:2]
+                # shape grezzo (per diagnosi: presence di position/id)
+                raw = cl.http.get(f"team/{tid}/players") or {}
+                items = raw.get("players") or []
+                out["raw_n"] = len(items)
+                if items:
+                    out["raw_item_keys"] = sorted(items[0].keys())
+                    out["raw_player_keys"] = sorted(
+                        (items[0].get("player") or {}).keys())[:20]
             sid = fplayers._season_id()
             out["season_id"] = sid
             if sid and (squad or []):

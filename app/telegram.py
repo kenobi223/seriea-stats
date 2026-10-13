@@ -1436,6 +1436,7 @@ class TelegramBot:
             self._send(chat_id, "Giocatore non trovato più. Riprova.",
                        _kb([[("⬅️ Fanta", "f:home")]]))
             return
+        fplayers.enrich(player)
         key, _ = self._fanta_user(chat_id)
         ok = fstore.add_player(key, player)
         st.pop("op", None)
