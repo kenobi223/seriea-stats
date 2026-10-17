@@ -1,6 +1,23 @@
 # /start — menu principale (comando NxCreate, runtime Python)
+def _api_base():
+    try:
+        v = env.get("API_BASE")
+        if v:
+            return str(v).rstrip("/")
+    except Exception:
+        pass
+    try:
+        import os
+        v = os.environ.get("API_BASE")
+        if v:
+            return str(v).rstrip("/")
+    except Exception:
+        pass
+    return "https://seriea-stats.lucaziello8.workers.dev"
+
+
 def start(message, u, text, command, args, call, params):
-    base = (env.get("API_BASE") or "").rstrip("/")
+    base = _api_base()
     lines = [
         "<b>Serie A Stats</b> ⚽",
         "",

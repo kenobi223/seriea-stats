@@ -8,6 +8,23 @@ def _h(s):
             .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
+def _api_base():
+    try:
+        v = env.get("API_BASE")
+        if v:
+            return str(v).rstrip("/")
+    except Exception:
+        pass
+    try:
+        import os
+        v = os.environ.get("API_BASE")
+        if v:
+            return str(v).rstrip("/")
+    except Exception:
+        pass
+    return "https://seriea-stats.lucaziello8.workers.dev"
+
+
 def fmt_schedina(slip):
     picks = slip.get("picks") or []
     if not picks:
@@ -41,7 +58,7 @@ def fmt_schedina(slip):
 
 
 def schedina(message, u, text, command, args, call, params):
-    base = (env.get("API_BASE") or "").rstrip("/")
+    base = _api_base()
     if not base:
         bot.replyText(u, "Configurazione mancante: variabile API_BASE.")
         return

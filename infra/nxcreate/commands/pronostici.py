@@ -16,6 +16,23 @@ def _bar(p):
     return "█" * full + "░" * (10 - full)
 
 
+def _api_base():
+    try:
+        v = env.get("API_BASE")
+        if v:
+            return str(v).rstrip("/")
+    except Exception:
+        pass
+    try:
+        import os
+        v = os.environ.get("API_BASE")
+        if v:
+            return str(v).rstrip("/")
+    except Exception:
+        pass
+    return "https://seriea-stats.lucaziello8.workers.dev"
+
+
 def fmt_pronostici(state):
     now = time.time()
     fx_list = [f for f in (state.get("fixtures") or [])
@@ -60,7 +77,7 @@ def fmt_pronostici(state):
 
 
 def pronostici(message, u, text, command, args, call, params):
-    base = (env.get("API_BASE") or "").rstrip("/")
+    base = _api_base()
     if not base:
         bot.replyText(u, "Configurazione mancante: variabile API_BASE.")
         return
