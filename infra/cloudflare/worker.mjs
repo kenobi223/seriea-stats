@@ -7,8 +7,9 @@
  *   seriea:learning.json   -> /api/tracking-records
  *   seriea:tg:started      -> SADD chat id dei /start (broadcast futuri)
  *
- * Bot Telegram: POST /tg (webhook, protetta da X-Telegram-Bot-Api-Secret-Token),
- * stessi comandi/format dei comandi NxCreate, reply via Bot API sendMessage.
+ * Bot Telegram: POST /tg (webhook, protetta da X-Telegram-Bot-Api-Secret-Token)
+ * -> bot.mjs handleUpdate: porta completa del bot Render (menu, comandi,
+ * sezioni, community, donazioni, /capo), reply via Bot API.
  *
  * Il sito statico (index.html, app.js, ...) e' servito dagli Assets
  * bindings (wrangler.toml): le richieste non-statiche arrivano qui.
@@ -16,6 +17,8 @@
  * NOTA: estensione .mjs (non .js) perche' il repo non ha package.json con
  * "type":"module": cosi' node puo' importare il modulo direttamente nei test.
  */
+
+import { handleUpdate } from "./bot.mjs";
 
 const API_TOKENS = { state: "seriea:state.json", learning: "seriea:learning.json", community: "seriea:community.json" };
 
@@ -165,6 +168,16 @@ function evaluateCommunity(data, state) {
   return changed;
 }
 
+// (vinti, persi, pending) di una schedina community — come community.entry_counts
+function entryCounts(entry) {
+  const picks = (entry && entry.picks) || [];
+  return [
+    picks.filter((p) => p.result === "win").length,
+    picks.filter((p) => p.result === "loss").length,
+    picks.filter((p) => !p.result).length,
+  ];
+}
+
 function communitySnapshot(state, data, key) {
   const rnd = currentRound(state);
   if (rnd == null) return { round: null, participants: 0, fixtures: [], aggregates: {}, my: null };
@@ -188,7 +201,7 @@ function communitySnapshot(state, data, key) {
   };
 }
 
-function communitySubmit(state, data, key, picks, rndIn) {
+function communitySubmit(state, data, key, picks, rndIn, meta) {
   const cur = currentRound(state);
   if (cur == null) return { status: "giornata non disponibile", code: 400 };
   const rnd = rndIn == null ? cur : rndIn;
@@ -199,6 +212,7 @@ function communitySubmit(state, data, key, picks, rndIn) {
   if (!block.entries || typeof block.entries !== "object") block.entries = {};
   if (block.entries[key]) return { status: "already", entry: block.entries[key], code: 409 };
   const entry = { picks: valid, ts: Math.floor(Date.now() / 1000) };
+  for (const [k, v] of Object.entries(meta || {})) if (v != null) entry[k] = v;
   block.entries[key] = entry;
   pruneRounds(data);
   return { status: "ok", entry, code: 200 };
@@ -230,8 +244,6 @@ function trackingRecords(learning) {
 
 // ------------------------------------------------------------- telegram bot
 const TG_LABELS = { "1": "1", "x": "x", "2": "2", "over_2.5": "over 2.5", "under_2.5": "under 2.5", "si": "btts si", "no": "btts no" };
-const TG_DATA_ERR = "Dati non disponibili, riprova tra qualche minuto.";
-const TG_API_BASE = "https://seriea-stats.lucaziello8.workers.dev";
 
 function h(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -374,72 +386,10 @@ function fmtRisultati(state) {
   return lines.join("\n").replace(/\s+$/, "");
 }
 
-const TG_AIUTO = [
-  "<b>Comandi</b>",
-  "/schedina — esiti della giornata",
-  "/pronostici — probabilità e value bet",
-  "/classifica — classifica Serie A",
-  "/risultati — ultime giornate",
-  "/aiuto — questo menu",
-];
-
-function tgStartText() {
-  const lines = [
-    "<b>Serie A Stats</b> ⚽",
-    "",
-    "Comandi:",
-    ...TG_AIUTO.slice(1),
-  ];
-  lines.push("", `Sito: <a href="${TG_API_BASE}">${TG_API_BASE.replace("https://", "")}</a>`);
-  return lines.join("\n");
-}
-
-async function redisSAdd(env, key, member) {
-  const res = await fetch(env.UPSTASH_REDIS_REST_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify(["SADD", key, member]),
-  });
-  if (!res.ok) throw new Error(`upstash SADD ${key}: HTTP ${res.status}`);
-}
-
-async function tgSend(env, chatId, text) {
-  const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true }),
-  });
-  if (!res.ok) throw new Error(`telegram sendMessage: HTTP ${res.status}`);
-}
-
 async function tgHandle(env, update) {
-  const msg = update && (update.message || update.edited_message);
-  if (!msg || typeof msg.text !== "string") return;
-  const m = msg.text.match(/^\/([A-Za-z0-9_]+)(?:@\S+)?(?:\s+[\s\S]*)?$/);
-  if (!m) return;
-  const chatId = msg.chat ? msg.chat.id : null;
-  if (chatId == null) return;
-  const cmd = m[1].toLowerCase();
-  let text = null;
-  if (cmd === "start") {
-    text = tgStartText();
-    try { await redisSAdd(env, "seriea:tg:started", String(chatId)); } catch { /* non bloccare */ }
-  } else if (cmd === "aiuto") {
-    text = TG_AIUTO.join("\n");
-  } else if (["classifica", "schedina", "pronostici", "risultati"].includes(cmd)) {
-    try {
-      const state = (await redisGet(env, API_TOKENS.state)) || {};
-      if (cmd === "classifica") text = fmtClassifica(state);
-      else if (cmd === "schedina") text = fmtSchedina(schedinaPayload(state.schedina || {}));
-      else if (cmd === "pronostici") text = fmtPronostici(state);
-      else text = fmtRisultati(state);
-    } catch {
-      text = TG_DATA_ERR;
-    }
-  } else {
-    return;
-  }
-  await tgSend(env, chatId, text);
+  // compat: i test/harness importano tgHandle da worker.mjs.
+  // Il bot completo (menu, comandi, sezioni, community, /capo) vive in bot.mjs.
+  return handleUpdate(update, env);
 }
 
 // ------------------------------------------------------------------ handler
@@ -539,4 +489,4 @@ async function route(request, env) {
   return err("endpoint inesistente", 404);
 }
 
-export { matchOutcomes, currentRound, dedupeHistory, schedinaPayload, communitySnapshot, communitySubmit, communityLoad, evaluateCommunity, trackingRecords, redisGet, fmtClassifica, fmtSchedina, fmtPronostici, fmtRisultati, tgHandle };
+export { matchOutcomes, currentRound, dedupeHistory, schedinaPayload, communitySnapshot, communitySubmit, communityLoad, evaluateCommunity, entryCounts, trackingRecords, redisGet, fmtClassifica, fmtSchedina, fmtPronostici, fmtRisultati, tgHandle, handleUpdate };
