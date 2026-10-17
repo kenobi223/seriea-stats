@@ -41,11 +41,36 @@ KEYS = {
 
 
 def _redis_url():
-    """Normalizza REDIS_URL: Upstash richiede TLS (rediss), accettiamo anche
-    la URL `redis://...` che Upstash mostra nella console."""
-    url = config.REDIS_URL or ""
-    if url.startswith("redis://") and "upstash.io" in url:
-        return url.replace("redis://", "rediss://", 1)
+    """Normalizza REDIS_URL per Upstash/Redis.
+
+    - `redis://...upstash.io`  -> `rediss://` (TLS obbligatorio)
+    - `https://...upstash.io`  -> `rediss://` (se viene incollata la REST URL)
+    - username mancante        -> `default` (Upstash rigetta
+      `rediss://:token@...` con "invalid username-password pair")
+    - strip degli spazi/newline finali da copia-incolla
+    """
+    url = (config.REDIS_URL or "").strip()
+    if not url:
+        return url
+    if "upstash.io" in url:
+        for prefix in ("redis://", "https://", "http://"):
+            if url.startswith(prefix):
+                url = "rediss://" + url[len(prefix):]
+                break
+        from urllib.parse import urlparse, urlunparse
+        p = urlparse(url)
+        if p.hostname:
+            if not p.username:
+                user, pw = "default", (p.password or "")
+            elif p.password is None:
+                # REST URL https://token@host: il token e' la password
+                user, pw = "default", p.username
+            else:
+                user, pw = p.username, p.password
+            netloc = f"{user}:{pw}@{p.hostname}"
+            if p.port:
+                netloc += f":{p.port}"
+            url = urlunparse(p._replace(netloc=netloc))
     return url
 
 

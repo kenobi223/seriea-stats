@@ -81,6 +81,16 @@ def main():
               flush=True)
         return 0
     try:
+        # REDIS_URL presente ma Redis non va: meglio fallire in faccia
+        # che "riuscire" scrivendo su disco effimero che si perde alla
+        # fine del job (stato/learning non esisterebbero per sito e bot).
+        if config.REDIS_URL and kv._redis() is None:
+            print("ENGINE_FAIL: REDIS_URL impostato ma Upstash/Redis non "
+                  "raggiungibile (controlla scheme rediss:// + user default "
+                  "+ token) -> abortisco senza scrivere su disco",
+                  flush=True)
+            return 1
+
         store = Store()
         store.load()
         store.set("code", "actions-engine@github")

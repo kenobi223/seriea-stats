@@ -127,6 +127,30 @@ def _load_cmd(name):
 
 
 class TestEngineHeadless(unittest.TestCase):
+    def test_redis_url_normalization(self):
+        """Upstash: username vuoto/REST URL/trailing space devono essere
+        normalizzati, altrimenti redis-py da "invalid username-password
+        pair" e il job perde lo stato su disco effimero."""
+        import config
+        from app.core import kv
+        cases = [
+            ("rediss://:tok@h.upstash.io",
+             "rediss://default:tok@h.upstash.io"),
+            ("redis://default:tok@h.upstash.io",
+             "rediss://default:tok@h.upstash.io"),
+            ("https://tok@h.upstash.io",
+             "rediss://default:tok@h.upstash.io"),
+            ("rediss://default:tok@h.upstash.io\n",
+             "rediss://default:tok@h.upstash.io"),
+        ]
+        orig = config.REDIS_URL
+        try:
+            for raw, want in cases:
+                config.REDIS_URL = raw
+                self.assertEqual(kv._redis_url(), want, f"per input {raw!r}")
+        finally:
+            config.REDIS_URL = orig
+
     def test_engine_import_no_flask_no_telegram(self):
         """engine.py deve importare senza trainare Flask ne' il bot Telegram."""
         code = ("import sys, os; sys.path.insert(0, os.getcwd()); import engine; "
