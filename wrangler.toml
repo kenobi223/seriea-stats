@@ -2,6 +2,14 @@ name = "seriea-stats"
 main = "infra/cloudflare/worker.mjs"
 compatibility_date = "2026-10-01"
 
+# Ogni build Git esegue "npx wrangler deploy", che CANCELLA le variabili
+# text messe dal dashboard (i secret invece sopravvivono): quindi l'URL
+# Upstash sta qui in [vars] e keep_vars = true protegge il resto.
+keep_vars = true
+
+[vars]
+UPSTASH_REDIS_REST_URL = "https://ethical-sparrow-82042.upstash.io"
+
 # Sito statico (index/app.js/style.css) servito dagli Assets bindings;
 # le richieste /api/* non matchano un asset e finiscono nel Worker, che
 # legge lo stesso Upstash Redis usato dal motore GitHub Actions.

@@ -1,10 +1,14 @@
 /**
- * Serie A Stats — Cloudflare Worker (facciata read + community).
+ * Serie A Stats — Cloudflare Worker (facciata read + community + bot Telegram).
  *
  * Legge lo stesso Upstash Redis del motore GitHub Actions (engine.py):
  *   seriea:state.json      -> /api/state, /api/health, /api/results, ...
  *   seriea:community.json  -> /api/community (GET/POST, stessa logica Flask)
  *   seriea:learning.json   -> /api/tracking-records
+ *   seriea:tg:started      -> SADD chat id dei /start (broadcast futuri)
+ *
+ * Bot Telegram: POST /tg (webhook, protetta da X-Telegram-Bot-Api-Secret-Token),
+ * stessi comandi/format dei comandi NxCreate, reply via Bot API sendMessage.
  *
  * Il sito statico (index.html, app.js, ...) e' servito dagli Assets
  * bindings (wrangler.toml): le richieste non-statiche arrivano qui.
@@ -224,6 +228,220 @@ function trackingRecords(learning) {
   return out;
 }
 
+// ------------------------------------------------------------- telegram bot
+const TG_LABELS = { "1": "1", "x": "x", "2": "2", "over_2.5": "over 2.5", "under_2.5": "under 2.5", "si": "btts si", "no": "btts no" };
+const TG_DATA_ERR = "Dati non disponibili, riprova tra qualche minuto.";
+const TG_API_BASE = "https://seriea-stats.lucaziello8.workers.dev";
+
+function h(s) {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function pyRaw(v) { return v == null ? "None" : String(v); }
+
+function fmt0(x) {
+  const v = Number(x) || 0;
+  const f = Math.floor(v), d = v - f;
+  if (d > 0.5) return String(f + 1);
+  if (d < 0.5) return String(f);
+  return String(f % 2 === 0 ? f : f + 1);
+}
+
+function pyNum(v) {
+  if (v == null) return "None";
+  if (typeof v !== "number") return String(v);
+  return Number.isInteger(v) ? `${v}.0` : String(v);
+}
+
+function fmtOdds(v) {
+  if (!v) return "0";
+  return Number.isInteger(v) ? `${v}.0` : String(v);
+}
+
+function tgBar(p) {
+  const v = (Number(p) || 0) * 10;
+  const f = Math.floor(v), d = v - f;
+  let full = Math.abs(d - 0.5) < 1e-9 ? (f % 2 === 0 ? f : f + 1) : Math.round(v);
+  full = Math.max(0, Math.min(10, full));
+  return "█".repeat(full) + "░".repeat(10 - full);
+}
+
+function utcDMHM(ts) {
+  const d = new Date(Number(ts) * 1000);
+  const p2 = (n) => String(n).padStart(2, "0");
+  return `${p2(d.getUTCDate())}/${p2(d.getUTCMonth() + 1)} ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`;
+}
+
+function fmtClassifica(state) {
+  const standings = state.standings || [];
+  if (!standings.length) return "Nessun dato classifica.";
+  const rows = [...standings]
+    .sort((a, b) => (a.position || 99) - (b.position || 99))
+    .slice(0, 20);
+  const lines = ["<b>🏆 Classifica Serie A</b>", "", "<pre>"];
+  for (const r of rows) {
+    const pos = String(r.position || 0).padStart(2);
+    const name = h(r.name || "").slice(0, 16).padEnd(16);
+    const pts = String(Math.trunc(Number(r.points) || 0)).padStart(3);
+    const pl = String(Math.trunc(Number(r.played) || 0)).padStart(2);
+    const gf = String(Math.trunc(Number(r.gf) || 0)).padStart(3);
+    const ga = String(Math.trunc(Number(r.ga) || 0)).padEnd(3);
+    lines.push(`${pos}. ${name} ${pts}pt  ${pl}g  ${gf}-${ga}`);
+  }
+  lines.push("</pre>");
+  return lines.join("\n");
+}
+
+function fmtSchedina(slip) {
+  const picks = slip.picks || [];
+  if (!picks.length) {
+    return "Nessuna schedina ancora pronta: la creo prima della prima partita della giornata.";
+  }
+  const lines = [`<b>🎫 Schedina giornata ${slip.round || "?"}</b>`, ""];
+  for (const p of picks) {
+    const pick = TG_LABELS[p.pick || "?"] ?? (p.pick || "?");
+    const odds = fmtOdds(p.odds || 0);
+    const pct = (Number(p.prob) || 0) * 100;
+    const score = p.score || "";
+    lines.push(`<b>${h(p.home)} - ${h(p.away)}</b>`);
+    if (p.result === "win") lines.push(`   ✔ ${pick} @ ${odds}  [${fmt0(pct)}%]  ${score} ✅`);
+    else if (p.result === "loss") lines.push(`   ✘ ${pick} @ ${odds}  [${fmt0(pct)}%]  ${score} ❌`);
+    else lines.push(`   ◻ ${pick} @ ${odds}  [${fmt0(pct)}%]  ⏳`);
+  }
+  let wins = 0, losses = 0;
+  for (const p of picks) { if (p.result === "win") wins++; else if (p.result === "loss") losses++; }
+  lines.push("");
+  lines.push(`<b>Combinata: ${wins} vinti · ${losses} persi</b>`);
+  const hist = slip.history || [];
+  if (hist.length) {
+    lines.push("");
+    lines.push("<b>📚 Schedine passate:</b>");
+    for (const hh of [...hist].reverse()) {
+      lines.push(`Giornata ${hh.round}: ${hh.wins ?? 0} vinti · ${hh.losses ?? 0} persi`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function fmtPronostici(state) {
+  const fxList = (state.fixtures || []).filter((f) => f.status !== "finished");
+  fxList.sort((a, b) => (a.start_ts || 0) - (b.start_ts || 0));
+  if (!fxList.length) return "Nessuna partita in calendario al momento.";
+  const lines = ["<b>🎯 Pronostici</b>", ""];
+  for (const fx of fxList.slice(0, 8)) {
+    const p = fx.predictions || {};
+    const probs = p["1x2"] || {};
+    const when = fx.start_ts ? utcDMHM(fx.start_ts) : "";
+    lines.push(`🕐 ${when}  <b>${h(fx.home)} - ${h(fx.away)}</b>`);
+    if (Object.keys(probs).length) {
+      lines.push(`   1X2  <b>${fmt0((probs["1"] || 0) * 100)}%</b> / ${fmt0((probs.x || 0) * 100)}% / ${fmt0((probs["2"] || 0) * 100)}%`);
+    }
+    const mp = (p.model_picks || {})["1x2"];
+    if (mp) {
+      const odds = mp.odds ? ` · quota ${Number(mp.odds).toFixed(2)}` : "";
+      const key = String(mp.key || mp.pick || "?");
+      let label = TG_LABELS[key] ?? key;
+      if (["1", "x", "2"].includes(key.toLowerCase())) label = label.toUpperCase();
+      const prob = Number(mp.prob) || 0;
+      lines.push(`   🎯 <b>${h(label)}</b> ${tgBar(prob)} ${fmt0(prob * 100)}%${odds}`);
+    }
+    const es = p.exact_score || [];
+    if (es.length) {
+      lines.push(`   Risultato esatto: <b>${h(es[0].score)}</b> ${fmt0((Number(es[0].prob) || 0) * 100)}%`);
+    }
+    const best = p.best_bets || [];
+    if (best.length) {
+      const b = best[0];
+      const edge = b.edge ? ` · +${fmt0(b.edge * 100)}%` : "";
+      lines.push(`   💰 <b>${h(b.pick)}</b> @ ${pyNum(b.odds)} (${fmt0((Number(b.prob) || 0) * 100)}%)${edge}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n").replace(/\s+$/, "");
+}
+
+function fmtRisultati(state) {
+  const results = state.results || [];
+  if (!results.length) return "Nessun risultato disponibile.";
+  const lines = ["<b>📋 Risultati Serie A</b>", ""];
+  for (const rnd of results.slice(-4)) {
+    lines.push(`<b>Giornata ${pyRaw(rnd.round)}</b>`);
+    for (const m of rnd.matches || []) {
+      lines.push(`  <b>${h(m.home)} ${h(m.score)} ${h(m.away)}</b>`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n").replace(/\s+$/, "");
+}
+
+const TG_AIUTO = [
+  "<b>Comandi</b>",
+  "/schedina — esiti della giornata",
+  "/pronostici — probabilità e value bet",
+  "/classifica — classifica Serie A",
+  "/risultati — ultime giornate",
+  "/aiuto — questo menu",
+];
+
+function tgStartText() {
+  const lines = [
+    "<b>Serie A Stats</b> ⚽",
+    "",
+    "Comandi:",
+    ...TG_AIUTO.slice(1),
+  ];
+  lines.push("", `Sito: <a href="${TG_API_BASE}">${TG_API_BASE.replace("https://", "")}</a>`);
+  return lines.join("\n");
+}
+
+async function redisSAdd(env, key, member) {
+  const res = await fetch(env.UPSTASH_REDIS_REST_URL, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify(["SADD", key, member]),
+  });
+  if (!res.ok) throw new Error(`upstash SADD ${key}: HTTP ${res.status}`);
+}
+
+async function tgSend(env, chatId, text) {
+  const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true }),
+  });
+  if (!res.ok) throw new Error(`telegram sendMessage: HTTP ${res.status}`);
+}
+
+async function tgHandle(env, update) {
+  const msg = update && (update.message || update.edited_message);
+  if (!msg || typeof msg.text !== "string") return;
+  const m = msg.text.match(/^\/([A-Za-z0-9_]+)(?:@\S+)?(?:\s+[\s\S]*)?$/);
+  if (!m) return;
+  const chatId = msg.chat ? msg.chat.id : null;
+  if (chatId == null) return;
+  const cmd = m[1].toLowerCase();
+  let text = null;
+  if (cmd === "start") {
+    text = tgStartText();
+    try { await redisSAdd(env, "seriea:tg:started", String(chatId)); } catch { /* non bloccare */ }
+  } else if (cmd === "aiuto") {
+    text = TG_AIUTO.join("\n");
+  } else if (["classifica", "schedina", "pronostici", "risultati"].includes(cmd)) {
+    try {
+      const state = (await redisGet(env, API_TOKENS.state)) || {};
+      if (cmd === "classifica") text = fmtClassifica(state);
+      else if (cmd === "schedina") text = fmtSchedina(schedinaPayload(state.schedina || {}));
+      else if (cmd === "pronostici") text = fmtPronostici(state);
+      else text = fmtRisultati(state);
+    } catch {
+      text = TG_DATA_ERR;
+    }
+  } else {
+    return;
+  }
+  await tgSend(env, chatId, text);
+}
+
 // ------------------------------------------------------------------ handler
 export default {
   async fetch(request, env) {
@@ -278,6 +496,20 @@ async function route(request, env) {
     return json({ available: false, running: false, url: null });
   }
 
+  if (path === "/tg") {
+    if (request.method !== "POST") return err("metodo non supportato", 405);
+    const sec = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
+    if (!env.TG_WEBHOOK_SECRET || sec !== env.TG_WEBHOOK_SECRET) return err("forbidden", 403);
+    if (!env.TELEGRAM_BOT_TOKEN) return err("config: TELEGRAM_BOT_TOKEN mancante", 500);
+    try {
+      const update = await request.json();
+      await tgHandle(env, update);
+    } catch (e) {
+      console.log("tg webhook error:", e && e.message ? e.message : e);
+    }
+    return new Response("ok");
+  }
+
   if (path === "/api/community") {
     const ip = request.headers.get("CF-Connecting-IP") || "sconosciuto";
     const key = "ip:" + ip;
@@ -307,4 +539,4 @@ async function route(request, env) {
   return err("endpoint inesistente", 404);
 }
 
-export { matchOutcomes, currentRound, dedupeHistory, schedinaPayload, communitySnapshot, communitySubmit, communityLoad, evaluateCommunity, trackingRecords, redisGet };
+export { matchOutcomes, currentRound, dedupeHistory, schedinaPayload, communitySnapshot, communitySubmit, communityLoad, evaluateCommunity, trackingRecords, redisGet, fmtClassifica, fmtSchedina, fmtPronostici, fmtRisultati, tgHandle };
