@@ -10,6 +10,13 @@ keep_vars = true
 [vars]
 UPSTASH_REDIS_REST_URL = "https://ethical-sparrow-82042.upstash.io"
 
+# Cron primario del motore: ogni 10 min il Worker fa il dispatch del
+# workflow engine su GitHub Actions (lo schedule nativo di GitHub salta
+# slot ad alto carico; il gruppo di concorrenza in engine.yml evita run
+# sovrapposti tra i due trigger).
+[triggers]
+crons = ["*/10 * * * *"]
+
 # Sito statico (index/app.js/style.css) servito dagli Assets bindings;
 # le richieste /api/* non matchano un asset e finiscono nel Worker, che
 # legge lo stesso Upstash Redis usato dal motore GitHub Actions.

@@ -392,6 +392,38 @@ async function tgHandle(env, update) {
   return handleUpdate(update, env);
 }
 
+// Dispatch del motore su GitHub Actions: e' il trigger primario ogni 10 min
+// (cron [triggers] di wrangler.toml). Il schedule nativo di engine.yml resta
+// come backup; l'anti-overlap e' garantito dal concurrency group del workflow.
+async function dispatchEngine(env) {
+  if (!env.GH_PAT) {
+    console.error("dispatch engine: secret GH_PAT mancante");
+    return;
+  }
+  try {
+    const res = await fetch(
+      "https://api.github.com/repos/kenobi223/seriea-stats/actions/workflows/engine.yml/dispatches",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.GH_PAT}`,
+          Accept: "application/vnd.github+json",
+          "Content-Type": "application/json",
+          "User-Agent": "seriea-stats-worker",
+        },
+        body: JSON.stringify({ ref: "main" }),
+      },
+    );
+    if (!res.ok) {
+      console.error(`dispatch engine: HTTP ${res.status} ${await res.text()}`);
+    } else {
+      console.log("dispatch engine: ok");
+    }
+  } catch (e) {
+    console.error(`dispatch engine: ${e && e.message ? e.message : e}`);
+  }
+}
+
 // ------------------------------------------------------------------ handler
 export default {
   async fetch(request, env) {
@@ -400,6 +432,9 @@ export default {
     } catch (e) {
       return err(`worker error: ${e && e.message ? e.message : e}`, 500);
     }
+  },
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(dispatchEngine(env));
   },
 };
 
