@@ -1,0 +1,67 @@
+name: engine
+
+# Motore Serie A: un ciclo di raccolta+pronostici ogni 15 minuti.
+# Repo pubblico = minutes illimitati. Stato persistito su Upstash Redis
+# (segreto REDIS_URL). Il sito (Cloudflare Workers) e il bot (NxCreate)
+# leggono gli stessi dati da li'.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+# Anti-overlap: se un run e' ancora attivo, il successivo resta in coda
+# (cancel-in-progress: false) e parte appena il precedente finisce.
+concurrency:
+  group: engine-seriea
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      DATA_SOURCE_ORDER: espn
+      SOFASCORE_TOR_MODE: never
+      # opzionale: senza il secret le notifiche (foto vinti/digest) vengono
+      # saltate silenziosamente dai guard if not config.TELEGRAM_BOT_TOKEN
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_OWNER_IDS: ${{ secrets.TELEGRAM_OWNER_IDS }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dipendenze
+        run: pip install -r requirements.txt
+
+      - name: Verifica presenza REDIS_URL
+        run: |
+          if [ -z "$REDIS_URL" ]; then
+            echo "::warning::Segreto REDIS_URL mancante: lo stato resterebbe solo sul disco effimero del runner"
+          fi
+
+      # 2 tentativi: retry su fallimento transitorio (espi momentanea down).
+      # Il lock Redis dentro engine.py evita doppio ciclo se il primo run
+      # resta appeso e il secondo parte da coda.
+      - name: Ciclo motore (max 2 tentativi)
+        run: |
+          for attempt in 1 2; do
+            echo "=== tentativo $attempt ==="
+            if python engine.py; then
+              echo "ciclo OK al tentativo $attempt"
+              exit 0
+            fi
+            echo "tentativo $attempt fallito"
+            sleep 60
+          done
+          echo "ciclo fallito dopo 2 tentativi"
+          exit 1

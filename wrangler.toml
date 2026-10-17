@@ -1,0 +1,10 @@
+name = "seriea-stats"
+main = "infra/cloudflare/worker.mjs"
+compatibility_date = "2026-10-01"
+
+# Sito statico (index/app.js/style.css) servito dagli Assets bindings;
+# le richieste /api/* non matchano un asset e finiscono nel Worker, che
+# legge lo stesso Upstash Redis usato dal motore GitHub Actions.
+[assets]
+directory = "./app/web/static"
+binding = "ASSETS"
