@@ -34,14 +34,9 @@ KEYS = {
     "tg_offset.json": os.path.join(config.DATA_DIR, "tg_offset.json"),
     "tg_users.json": os.path.join(config.DATA_DIR, "tg_users.json"),
     "coaches.json": config.COACHES_FILE,
-    "maintenance.json": os.path.join(config.DATA_DIR, "maintenance.json"),
     "digest_sent.json": os.path.join(config.DATA_DIR, "digest_sent.json"),
     "donors.json": os.path.join(config.DATA_DIR, "donors.json"),
     "community.json": os.path.join(config.DATA_DIR, "community.json"),
-    "fanta.json": os.path.join(config.DATA_DIR, "fanta.json"),
-    "fanta_index.json": os.path.join(config.DATA_DIR, "fanta_index.json"),
-    "fanta_stats.json": os.path.join(config.DATA_DIR, "fanta_stats.json"),
-    "fanta_index_status.json": os.path.join(config.DATA_DIR, "fanta_index_status.json"),
 }
 
 

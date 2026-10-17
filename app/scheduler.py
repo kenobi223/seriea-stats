@@ -305,14 +305,6 @@ def run_cycle(store):
     except Exception as e:
         log.debug("digest automatici falliti: %s", e)
 
-    # ---- indice giocatori fanta: precaricato qui in background (no-op se
-    #      cache <12h) così la prima ricerca sul sito/bot è già pronta
-    try:
-        from app.fanta import players as fanta_players
-        fanta_players.ensure_index_async(store)
-    except Exception as e:
-        log.debug("fanta build_index fallita: %s", e)
-
     try:
         tracking, calibration = tracker.analyze()
     except Exception as e:
@@ -397,17 +389,6 @@ class Scheduler:
     def start(self):
         thread = threading.Thread(target=self._loop, daemon=True)
         thread.start()
-        # Mimo QA congelato su richiesta owner (2026-10-06): parte solo con AGENTS_ENABLED=1
-        if os.environ.get("AGENTS_ENABLED") == "1":
-            try:
-                from app.analysis.mimo_agent import MimoAgent
-                mimo = MimoAgent(self.store)
-                mimo.start()
-                log.info("Mimo v2.5 Free QA agent avviato")
-            except Exception as e:
-                log.warning("Mimo agent non avviato: %s", e)
-        else:
-            log.info("Mimo congelato (AGENTS_ENABLED!=1)")
         return self
 
     def stop(self):

@@ -21,7 +21,6 @@ import requests
 import config
 from app import notify, subs
 from app.analysis.assistant import answer
-from app.analysis.llm import ask_ai
 from app.core import kv
 from app.i18n import DONATION_OPTIONS, Tr
 
@@ -371,7 +370,6 @@ def _menu_kb(tr, section=None):
          (tr._t("menu_tracking"), "p:tracking")],
         [(tr._t("menu_morale"), "p:morale"),
          (tr._t("menu_community"), "p:community")],
-        [(tr._t("menu_fanta"), "f:home")],
         [(tr._t("menu_segui"), "flw"),
          (tr._t("menu_stopsegui"), "unf")],
     ]
@@ -479,7 +477,6 @@ class TelegramBot:
         self._running = False
         self._last_err = ""
         self._cm_drafts = {}      # community: bozze per chat {fid: {market,pick}}
-        self._fanta_state = {}    # fanta: stato wizard per chat {op, hits, draft, ...}
         off = kv.read_json("tg_offset.json")
         if isinstance(off, dict) and isinstance(off.get("offset"), int):
             self._offset = off["offset"]
@@ -597,9 +594,6 @@ class TelegramBot:
                 else _menu_kb(tr, section=section)
             self._edit_or_send(chat_id, message_id, text, kb)
             return
-        if section == "fanta":
-            self._fanta_home(chat_id, message_id)
-            return
         text = self._section_text(tr, section)
         kb = _menu_kb(tr, section=section)
         if section in ("pronostici",):
@@ -613,23 +607,6 @@ class TelegramBot:
     def _on_callback(self, chat_id, callback_id, message_id, data):
         toast = "⭐ Invio la fattura…" if data.startswith("don:") else None
         self._answer_cb(callback_id, toast)
-        # maint approval: solo capo può approvare
-        if data.startswith("maint_ok:") or data.startswith("maint_no:"):
-            if chat_id not in config.TELEGRAM_OWNER_IDS:
-                self._send(chat_id, "🚫 Solo @Ziosapi può approvare.")
-                return
-            pid = data.split(":",1)[1]
-            try:
-                from app import maintenance as maint
-                if data.startswith("maint_ok:"):
-                    ok, msg = maint.approve_pending(pid)
-                    self._edit_or_send(chat_id, message_id, f"✅ {msg} - proposta {pid}", _menu_kb(Tr(chat_id)))
-                else:
-                    ok, msg = maint.reject_pending(pid)
-                    self._edit_or_send(chat_id, message_id, f"❌ {msg} - proposta {pid} cancellata", _menu_kb(Tr(chat_id)))
-            except Exception as e:
-                self._send(chat_id, f"Errore: {e}")
-            return
         if not self._authorized(chat_id):
             return
         tr = Tr(chat_id)
@@ -667,8 +644,6 @@ class TelegramBot:
                 self._cm_match(chat_id, message_id, data[3:])
             elif data == "cmsub":
                 self._cm_submit(chat_id, message_id)
-            elif data.startswith("f:"):
-                self._fanta_callback(chat_id, message_id, data[2:])
         except Exception as e:
             log.error("Telegram: callback %s fallita: %s", data, e)
 
@@ -1136,9 +1111,7 @@ class TelegramBot:
         self._send(chat_id, tr._t("ai_thinking"))
         fixtures = self.store.get("fixtures", [])
         standings = self.store.get("standings", [])
-        result = ask_ai(question, fixtures, standings)
-        if result is None:
-            result = answer(question, fixtures)
+        result = answer(question, fixtures)
         self._send(chat_id, _render(result), _menu_kb(tr))
 
     # ---------------------------------------------------------- donazioni
@@ -1263,553 +1236,8 @@ class TelegramBot:
                 self._send(chat_id, tr._t("subs_coupon_ok"), _menu_kb(tr))
             else:
                 self._send(chat_id, tr._t("subs_coupon_bad"), _menu_kb(tr))
-        elif text.startswith("/opencode") or text.startswith("/fix") or text.startswith("/code"):
-            if chat_id not in config.TELEGRAM_OWNER_IDS:
-                self._send(chat_id, "🚫 Solo @Ziosapi può usare /opencode.")
-                return
-            req = text.split(None, 1)[1].strip() if len(text.split(None, 1)) > 1 else ""
-            if not req:
-                self._send(chat_id, "Usa: /opencode <descrizione fix>", _menu_kb(Tr(chat_id)))
-                return
-            from app import maintenance as maint
-            from app.analysis import codegen
-            log.info("/opencode ricevuto: %s", req)
-            self._send(chat_id, f"⏳ Elaboro: {req} ...")
-            try:
-                changes = codegen.generate_fix(req)
-                log.info("/opencode generate_fix restituito: %d modifiche", len(changes) if changes else 0)
-            except Exception as e:
-                log.warning("/opencode eccezione: %s", e)
-                self._send(chat_id, f"❌ Errore LLM: {e}", _menu_kb(Tr(chat_id)))
-                return
-            if not changes:
-                self._send(chat_id, "❌ LLM non ha prodotto modifiche valide.", _menu_kb(Tr(chat_id)))
-                return
-            import pathlib
-            project_root = pathlib.Path(__file__).resolve().parent.parent
-            applied = []
-            for ch in changes:
-                fp = project_root / ch["path"]
-                fp.parent.mkdir(parents=True, exist_ok=True)
-                fp.write_text(ch["content"], encoding="utf-8")
-                applied.append(ch["path"])
-                log.info("/opencode: scritto %s (%d chars)", ch["path"], len(ch["content"]))
-            file_list = ", ".join(applied)
-            ok_push, push_msg = maint._git_push("opencode: %s" % req, files=applied)
-            status = "✅" if ok_push else "⚠️"
-            self._send(chat_id, f"{status} Applicato: {file_list}\n{push_msg}", _menu_kb(Tr(chat_id)))
         else:
             self._send_menu(chat_id)
-
-    # --------------------------------------------------------------- fanta
-    def _fanta_state_for(self, chat_id):
-        return self._fanta_state.setdefault(str(chat_id), {})
-
-    def _fanta_user(self, chat_id):
-        from app.fanta import store as fstore
-        key = fstore.user_key_tg(chat_id)
-        return key, fstore.get_user(key) or {}
-
-    def _fanta_home(self, chat_id, message_id=None):
-        tr = Tr(chat_id)
-        _key, user = self._fanta_user(chat_id)
-        rosa_n = len(user.get("rosa") or [])
-        modulo = user.get("modulo") or "4-4-2"
-        mdif = "ON" if user.get("mod_dif") else "OFF"
-        code = user.get("code") or "—"
-        text = (f"⚽ <b>Fanta</b>\n"
-                f"Rosa: {rosa_n} giocatori · Modulo: {modulo} · "
-                f"Mod dif: {mdif}\n"
-                f"Codice sito: <code>{_h(code)}</code>\n\n"
-                "Classico fantacalcio con voti reali (fantacalcio.it): "
-                "fantamedia, titolarità e agenda. La formazione consigliata "
-                "ti propone il miglior undici della tua rosa.\n\n"
-                "📥 Puoi anche mandarmi il <b>.csv</b> esportato da Leghe "
-                "Fantacalcio: importo la rosa da solo.")
-        rows = [
-            [("🌹 Rosa", "f:rosa"), ("📋 Valuta XI", "f:rate")],
-            [("✨ Consigliata", "f:sugg"), ("🧩 Modulo", "f:mod")],
-            [("🛡 Mod dif: " + mdif, "f:mdif"), ("🔑 Codice", "f:code")],
-        ]
-        if user.get("rosa"):
-            rows.insert(0, [("⚔️ Formazione titolare", "f:xi")])
-        rows.append([(tr._t("menu_menu"), "m")])
-        if message_id:
-            self._edit_or_send(chat_id, message_id, text, _kb(rows))
-        else:
-            self._send(chat_id, text, _kb(rows))
-
-    def _fanta_rosa(self, chat_id, message_id=None, note=None):
-        _key, user = self._fanta_user(chat_id)
-        rosa = user.get("rosa") or []
-        if not rosa:
-            text = note or ("🌹 Rosa vuota. Premi ➕ Aggiungi e scrivi il "
-                            "nome del giocatore.")
-        else:
-            lines = ["🌹 <b>La tua rosa</b>"]
-            order = {"P": 0, "D": 1, "C": 2, "A": 3}
-            for p in sorted(rosa, key=lambda x: (order.get(x.get("role"), 9),
-                                                 x.get("name") or "")):
-                lines.append(f"• {_h(p['name'])} ({_h(p['team'])}) "
-                             f"[{_h(p.get('role'))}]")
-            text = "\n".join(lines)
-            if note:
-                text = _h(note) + "\n\n" + text
-        rows = [[("➕ Aggiungi", "f:add"), ("➖ Rimuovi", "f:del")]]
-        rows.append([("⬅️ Fanta", "f:home")])
-        if message_id:
-            self._edit_or_send(chat_id, message_id, text, _kb(rows))
-        else:
-            self._send(chat_id, text, _kb(rows))
-
-    def _fanta_add_prompt(self, chat_id, message_id):
-        st = self._fanta_state_for(chat_id)
-        st.clear()
-        st["op"] = "add"
-        self._edit_or_send(
-            chat_id, message_id,
-            "➕ Scrivi il cognome del giocatore (es. <i>Martinez</i>, "
-            "<i>Barella</i>). Riceverai i risultati da scegliere.", None)
-
-    def _fanta_code_prompt(self, chat_id, message_id):
-        _key, user = self._fanta_user(chat_id)
-        cur = user.get("code")
-        st = self._fanta_state_for(chat_id)
-        st.clear()
-        st["op"] = "code"
-        cur_txt = f"<code>{_h(cur)}</code>\n" if cur else "nessuno\n"
-        self._edit_or_send(
-            chat_id, message_id,
-            "🔑 Codice sito: " + cur_txt +
-            "Scrivi un codice personale (3-12 caratteri, solo lettere/numeri) "
-            "da usare sul sito (tab Fanta) per collegare la tua rosa.", None)
-
-    def _fanta_text(self, chat_id, text):
-        """Testo libero durante il wizard fanta (add giocatore / codice)."""
-        st = self._fanta_state_for(chat_id)
-        op = st.get("op")
-        if op == "add":
-            from app.fanta import players as fplayers
-            hits = fplayers.search(self.store, text, limit=8)
-            st["hits"] = hits
-            if not hits:
-                self._send(chat_id, f"Nessun giocatore trovato per "
-                                     f"«{_h(text)}». Prova un altro nome — "
-                                     "se è la prima volta l'indice potrebbe "
-                                     "ancora essere in costruzione: "
-                                     "riprova tra un minuto.")
-                return
-            rows = [[(f"{p['name']} · {p['team']} [{p['role']}]",
-                      f"f:pick:{p['id']}")] for p in hits]
-            rows.append([("⬅️ Annulla", "f:rosa")])
-            self._send(chat_id, "Scegli un giocatore:", _kb(rows))
-        elif op == "code":
-            from app.fanta import store as fstore
-            key, _ = self._fanta_user(chat_id)
-            code = fstore.set_code(key, text)
-            if code:
-                st.clear()
-                self._send(chat_id,
-                           f"🔑 Codice sito: <code>{code}</code>\n"
-                           "Inseriscilo sul sito (tab Fanta) per collegare "
-                           "la rosa.", _kb([[("⬅️ Fanta", "f:home")]]))
-            else:
-                self._send(chat_id, "Codice non valido o già preso: scegline "
-                                     "uno diverso (3-12 caratteri).")
-        else:
-            st.clear()
-
-    def _fanta_pick(self, chat_id, message_id, pid):
-        from app.fanta import players as fplayers
-        from app.fanta import store as fstore
-        st = self._fanta_state_for(chat_id)
-        try:
-            pid = int(pid)
-        except (TypeError, ValueError):
-            return
-        player = next((p for p in (st.get("hits") or [])
-                       if p.get("id") == pid), None)
-        if player is None:
-            for p in fplayers.ensure_index_async(self.store):
-                if p.get("id") == pid:
-                    player = p
-                    break
-        if player is None:
-            self._send(chat_id, "Giocatore non trovato più. Riprova.",
-                       _kb([[("⬅️ Fanta", "f:home")]]))
-            return
-        fplayers.enrich(player)
-        key, _ = self._fanta_user(chat_id)
-        ok = fstore.add_player(key, player)
-        st.pop("op", None)
-        st.pop("hits", None)
-        note = ("✅ Aggiunto: " if ok else "⚠️ Già in rosa: ") + \
-            f"{player['name']} ({player['team']})"
-        self._fanta_rosa(chat_id, message_id, note=note)
-
-    def _fanta_del(self, chat_id, message_id):
-        _key, user = self._fanta_user(chat_id)
-        rosa = user.get("rosa") or []
-        if not rosa:
-            self._edit_or_send(chat_id, message_id, "Rosa vuota.",
-                               _kb([[("⬅️ Fanta", "f:home")]]))
-            return
-        text = "➖ Scegli il giocatore da rimuovere:"
-        rows = [[(f"{p['name']} · {p['team']}", f"f:rm:{p['id']}")]
-                for p in rosa[:10]]
-        if len(rosa) > 10:
-            rows.append([(f"…e altri {len(rosa) - 10}", "f:del")])
-        rows.append([("⬅️ Fanta", "f:home")])
-        self._edit_or_send(chat_id, message_id, text, _kb(rows))
-
-    def _fanta_rm(self, chat_id, message_id, pid):
-        from app.fanta import store as fstore
-        try:
-            pid = int(pid)
-        except (TypeError, ValueError):
-            return
-        key, _ = self._fanta_user(chat_id)
-        ok = fstore.remove_player(key, pid)
-        self._fanta_rosa(chat_id, message_id,
-                         note="✅ Rimosso." if ok else None)
-
-    def _fanta_mod(self, chat_id, message_id):
-        from app.fanta.store import MODULI
-        _key, user = self._fanta_user(chat_id)
-        cur = user.get("modulo") or "4-4-2"
-        rows = [[(("✓ " if m == cur else "") + m, f"f:modx:{m}")]
-                for m in MODULI]
-        rows.append([("⬅️ Fanta", "f:home")])
-        self._edit_or_send(chat_id, message_id, "🧩 Scegli il modulo:",
-                           _kb(rows))
-
-    def _fanta_modx(self, chat_id, message_id, mod):
-        from app.fanta import store as fstore
-        if mod not in fstore.MODULI:
-            return
-        key, _ = self._fanta_user(chat_id)
-        fstore.upsert_user(key, modulo=mod, xi=[])
-        self._fanta_home(chat_id, message_id)
-
-    def _fanta_mdif(self, chat_id, message_id):
-        from app.fanta import store as fstore
-        key, user = self._fanta_user(chat_id)
-        fstore.upsert_user(key, mod_dif=not bool(user.get("mod_dif")))
-        self._fanta_home(chat_id, message_id)
-
-    # -- wizard formazione titolare (slot per ruolo)
-    def _fanta_xi(self, chat_id, message_id):
-        _key, user = self._fanta_user(chat_id)
-        if not (user.get("rosa") or []):
-            self._edit_or_send(chat_id, message_id,
-                               "Aggiungi prima i giocatori (🌹 Rosa).",
-                               _kb([[("⬅️ Fanta", "f:home")]]))
-            return
-        st = self._fanta_state_for(chat_id)
-        st.clear()
-        st["op"] = "xi"
-        st["draft"] = []
-        self._fanta_xi_next(chat_id, message_id)
-
-    def _fanta_xi_next(self, chat_id, message_id):
-        from app.fanta.store import MOD_SLOTS
-        _key, user = self._fanta_user(chat_id)
-        modulo = user.get("modulo") or "4-4-2"
-        slots = MOD_SLOTS.get(modulo) or MOD_SLOTS["4-4-2"]
-        st = self._fanta_state_for(chat_id)
-        draft = list(st.get("draft") or [])
-        rosa = user.get("rosa") or []
-        by_id = {p["id"]: p for p in rosa}
-        used = set(draft)
-        done = {}
-        for pid in draft:
-            p = by_id.get(pid)
-            if p:
-                done[p.get("role")] = done.get(p.get("role"), 0) + 1
-        missing = None
-        for role in ("P", "D", "C", "A"):
-            need = slots.get(role, 0) - done.get(role, 0)
-            if need > 0:
-                missing = (role, need)
-                break
-        if not missing:
-            from app.fanta import store as fstore
-            fstore.set_xi(_key, draft)
-            st.pop("op", None)
-            st.pop("draft", None)
-            self._fanta_rate(chat_id, message_id)
-            return
-        role, need = missing
-        cands = [p for p in rosa if p.get("role") == role
-                 and p.get("id") not in used]
-        page = int(st.get("page") or 0)
-        pages = [cands[i:i + 8] for i in range(0, len(cands), 8)] or [[]]
-        page = min(max(page, 0), len(pages) - 1)
-        st["page"] = page
-        rows = [[(f"{p['name']} · {p['team']}", f"f:xip:{p['id']}")]
-                for p in pages[page]]
-        nav = []
-        if page > 0:
-            nav.append(("◀️", "f:xipg:-1"))
-        nav.append((f"{page + 1}/{len(pages)}", "f:xinoop"))
-        if page < len(pages) - 1:
-            nav.append(("▶️", "f:xipg:1"))
-        rows.append(nav)
-        rows.append([("🎲 Auto completa", "f:xiauto"),
-                     ("🔄 Ricomincia", "f:xireset")])
-        if draft:
-            rows.append([("⬅️ Indietro", "f:xiundo")])
-        role_it = {"P": "Portiere", "D": "Difensore", "C": "Centrocampista",
-                   "A": "Attaccante"}[role]
-        plur = "mano" if need == 1 else "mancanti"
-        text = (f"⚔️ Formazione titolare — modulo {modulo}\n"
-                f"Scegli {role_it} ({need} {plur})\n"
-                f"Scelti finora: {len(draft)}/11")
-        self._edit_or_send(chat_id, message_id, text, _kb(rows))
-
-    def _fanta_xip(self, chat_id, message_id, pid):
-        st = self._fanta_state_for(chat_id)
-        try:
-            pid = int(pid)
-        except (TypeError, ValueError):
-            return
-        draft = list(st.get("draft") or [])
-        if pid not in draft:
-            draft.append(pid)
-        st["draft"] = draft
-        st["page"] = 0
-        self._fanta_xi_next(chat_id, message_id)
-
-    def _fanta_xipg(self, chat_id, message_id, delta):
-        st = self._fanta_state_for(chat_id)
-        try:
-            st["page"] = max(0, int(st.get("page") or 0) + int(delta))
-        except (TypeError, ValueError):
-            pass
-        self._fanta_xi_next(chat_id, message_id)
-
-    def _fanta_xiauto(self, chat_id, message_id):
-        from app.fanta import engine as fengine
-        from app.fanta import store as fstore
-        _key, user = self._fanta_user(chat_id)
-        modulo = user.get("modulo") or "4-4-2"
-        reports = []
-        for p in user.get("rosa") or []:
-            try:
-                reports.append(fengine.player_report(
-                    self.store, p, bool(user.get("mod_dif"))))
-            except Exception as e:
-                log.debug("fanta auto report %s: %s", p.get("name"), e)
-        best = fengine.best_xi(reports, modulo)
-        key, _ = self._fanta_user(chat_id)
-        fstore.set_xi(key, [r["id"] for r in best["xi"]])
-        st = self._fanta_state_for(chat_id)
-        st.clear()
-        self._fanta_rate(chat_id, message_id)
-
-    def _fanta_xi_text(self, res, title):
-        lines = [f"<b>{title}</b> — modulo {res.get('modulo')}"
-                 + (" · mod dif ON" if res.get("mod_dif") else "")]
-        if res.get("auto"):
-            lines.append("<i>(formazione automatica — usa ⚔️ Formazione per "
-                         "scegliere tu)</i>")
-        for r in res.get("xi") or []:
-            arrow = "↑" if r.get("trend") == "up" else \
-                "↓" if r.get("trend") == "down" else "→"
-            flags = " 🚑" if r.get("injured") else ""
-            tit = f" · tit {r['tit']}%" if r.get("tit") is not None else ""
-            lines.append(
-                f"{_h(r.get('role'))} <b>{_h(r.get('name'))}</b> "
-                f"({_h(r.get('team'))}) — {r.get('score')} {arrow}{flags}{tit}")
-        lines.append(f"\n<b>Media ponderata: {res.get('total')} · "
-                     f"{_h(res.get('label') or '')}</b>")
-        return "\n".join(lines)
-
-    def _fanta_rate(self, chat_id, message_id=None):
-        from app.fanta import engine as fengine
-        _key, user = self._fanta_user(chat_id)
-        if not (user.get("rosa") or []):
-            self._send(chat_id, "🌹 Rosa vuota: aggiungi prima i giocatori.",
-                       _kb([[("⬅️ Fanta", "f:home")]]))
-            return
-        self._send(chat_id, "⏳ Calcolo le valutazioni…")
-        try:
-            res = fengine.evaluate(self.store, user)
-        except Exception as e:
-            log.error("fanta evaluate: %s", e)
-            self._send(chat_id, f"❌ Errore valutazione: {_h(e)}",
-                       _kb([[("⬅️ Fanta", "f:home")]]))
-            return
-        if res.get("error"):
-            self._send(chat_id, "⚠️ " + _h(res["error"]),
-                       _kb([[("⬅️ Fanta", "f:home")]]))
-            return
-        text = self._fanta_xi_text(res, "📋 Valutazione formazione")
-        rows = [[("⚔️ Riforma XI", "f:xi"), ("✨ Consigliata", "f:sugg")],
-                [("⬅️ Fanta", "f:home")]]
-        self._send(chat_id, text, _kb(rows))
-
-    def _fanta_sugg(self, chat_id, message_id=None):
-        from app.fanta import engine as fengine
-        _key, user = self._fanta_user(chat_id)
-        if not (user.get("rosa") or []):
-            self._send(chat_id, "🌹 Rosa vuota: aggiungi prima i giocatori.",
-                       _kb([[("⬅️ Fanta", "f:home")]]))
-            return
-        self._send(chat_id, "⏳ Provo tutti i moduli…")
-        try:
-            res = fengine.suggest(self.store, user,
-                                  bool(user.get("mod_dif")))
-        except Exception as e:
-            log.error("fanta suggest: %s", e)
-            self._send(chat_id, f"❌ Errore: {_h(e)}",
-                       _kb([[("⬅️ Fanta", "f:home")]]))
-            return
-        if res.get("error"):
-            self._send(chat_id, "⚠️ " + _h(res["error"]),
-                       _kb([[("⬅️ Fanta", "f:home")]]))
-            return
-        st = self._fanta_state_for(chat_id)
-        st["sugg_xi"] = [r["id"] for r in res.get("xi") or []]
-        res = dict(res)
-        res["mod_dif"] = bool(user.get("mod_dif"))
-        res["auto"] = False
-        text = self._fanta_xi_text(res, "✨ Formazione consigliata")
-        rows = [[("✅ Usa questa", f"f:usasugg:{res.get('modulo')}")],
-                [("⬅️ Fanta", "f:home")]]
-        self._send(chat_id, text, _kb(rows))
-
-    def _fanta_usasugg(self, chat_id, message_id, mod):
-        from app.fanta import store as fstore
-        st = self._fanta_state_for(chat_id)
-        xi = st.pop("sugg_xi", None)
-        key, user = self._fanta_user(chat_id)
-        modulo = mod if mod in fstore.MODULI else \
-            (user.get("modulo") or "4-4-2")
-        fstore.upsert_user(key, modulo=modulo, xi=list(xi or []))
-        self._fanta_home(chat_id, message_id)
-        self._send(chat_id, "✅ Formazione consigliata salvata come "
-                            "titolare.")
-
-    def _fanta_document(self, chat_id, doc):
-        """Import rosa da un .csv inviato in chat (scarica via getFile)."""
-        filename = (doc.get("file_name") or "").lower()
-        if not filename.endswith(".csv") and doc.get("mime_type") not in (
-                "text/csv", "application/vnd.ms-excel",
-                "text/comma-separated-values"):
-            self._send(chat_id, "📥 Mandami il file <b>.csv</b> esportato da "
-                                 "Leghe Fantacalcio (Rosa → esporta).")
-            return
-        file_id = doc.get("file_id")
-        info = self._call("getFile", {"file_id": file_id})
-        if not info or not info.get("file_path"):
-            self._send(chat_id, "❌ Non riesco a scaricare il file.")
-            return
-        url = f"https://api.telegram.org/file/bot{self.token}/{info['file_path']}"
-        try:
-            r = requests.get(url, timeout=30)
-            r.raise_for_status()
-            raw = r.content
-        except Exception as e:
-            self._send(chat_id, f"❌ Download fallito: {_h(e)}")
-            return
-
-        from app.fanta import importer
-        from app.fanta import players as fplayers
-        from app.fanta import store as fstore
-        rows, meta = importer.parse_csv(raw)
-        if not rows:
-            self._send(chat_id, "❌ CSV vuoto o non leggibile. "
-                                 f"({_h(meta.get('error') or 'nessuna riga')})")
-            return
-        self._send(chat_id, f"📥 Lette {len(rows)} righe, riconosco i "
-                             "giocatori…")
-        index = fplayers.ensure_index_async(self.store)
-        if not index:
-            self._send(chat_id, "⚠️ Indice giocatori in costruzione, "
-                                 "riprova tra qualche secondo e rimanda il file.")
-            return
-        res = importer.import_rows(rows, index)
-        key, user = self._fanta_user(chat_id)
-        rosa = list(user.get("rosa") or [])
-        have = {p.get("id") for p in rosa}
-        for p in res["matched"]:
-            if p["id"] not in have:
-                rosa.append({"id": p["id"], "name": p["name"],
-                             "team": p["team"], "role": p["role"]})
-        fstore.upsert_user(key, rosa=rosa,
-                           xi=[x for x in (user.get("xi") or [])
-                               if x in {p["id"] for p in rosa}])
-        lines = [f"✅ Importati <b>{len(res['matched'])}</b> giocatori "
-                 f"(rosa ora: {len(rosa)})."]
-        if res["ambiguous"]:
-            lines.append(f"\n⚠️ <b>Ambigui</b> ({len(res['ambiguous'])}):")
-            for p in res["ambiguous"][:8]:
-                lines.append(f"• {_h(p.get('csv_name'))} → {_h(p['name'])} "
-                             f"({_h(p['team'])})")
-        if res["missing"]:
-            lines.append(f"\n🚫 <b>Non trovati</b> ({len(res['missing'])}) — "
-                         "aggiungili a mano:")
-            for p in res["missing"][:10]:
-                lines.append(f"• {_h(p.get('name'))} "
-                             f"[{_h(p.get('role'))}]")
-        self._send(chat_id, "\n".join(lines),
-                   _kb([[("🌹 Vedi rosa", "f:rosa"),
-                         ("📋 Valuta", "f:rate")],
-                        [("⬅️ Fanta", "f:home")]]))
-
-    def _fanta_callback(self, chat_id, message_id, rest):
-        if rest in ("home", ""):
-            self._fanta_home(chat_id, message_id)
-        elif rest == "rosa":
-            self._fanta_rosa(chat_id, message_id)
-        elif rest == "add":
-            self._fanta_add_prompt(chat_id, message_id)
-        elif rest == "del":
-            self._fanta_del(chat_id, message_id)
-        elif rest == "mod":
-            self._fanta_mod(chat_id, message_id)
-        elif rest == "mdif":
-            self._fanta_mdif(chat_id, message_id)
-        elif rest == "code":
-            self._fanta_code_prompt(chat_id, message_id)
-        elif rest == "xi":
-            self._fanta_xi(chat_id, message_id)
-        elif rest == "xiauto":
-            self._fanta_xiauto(chat_id, message_id)
-        elif rest == "xiundo":
-            st = self._fanta_state_for(chat_id)
-            d = list(st.get("draft") or [])
-            if d:
-                d.pop()
-            st["draft"] = d
-            st["page"] = 0
-            self._fanta_xi_next(chat_id, message_id)
-        elif rest == "xireset":
-            st = self._fanta_state_for(chat_id)
-            st["draft"] = []
-            st["page"] = 0
-            self._fanta_xi_next(chat_id, message_id)
-        elif rest == "xinoop":
-            pass
-        elif rest == "rate":
-            self._fanta_rate(chat_id, message_id)
-        elif rest == "sugg":
-            self._fanta_sugg(chat_id, message_id)
-        elif rest.startswith("pick:"):
-            self._fanta_pick(chat_id, message_id, rest[5:])
-        elif rest.startswith("rm:"):
-            self._fanta_rm(chat_id, message_id, rest[3:])
-        elif rest.startswith("modx:"):
-            self._fanta_modx(chat_id, message_id, rest[5:])
-        elif rest.startswith("xip:"):
-            self._fanta_xip(chat_id, message_id, rest[4:])
-        elif rest.startswith("xipg:"):
-            self._fanta_xipg(chat_id, message_id, rest[5:])
-        elif rest.startswith("usasugg:"):
-            self._fanta_usasugg(chat_id, message_id, rest[8:])
-        else:
-            self._fanta_home(chat_id, message_id)
 
     # ------------------------------------------------------------ loop
     def start(self):
@@ -2011,45 +1439,12 @@ class TelegramBot:
             log.info("Telegram: chat %s non autorizzata", chat_id)
             return
 
-        doc = msg.get("document") or {}
-        if doc:
-            try:
-                self._fanta_document(chat_id, doc)
-            except Exception as e:
-                log.error("Telegram: import documento fallito: %s", e)
-                self._send(chat_id, f"❌ Import fallito: {_h(e)}")
-            return
-
         text = (msg.get("text") or "").strip()
         if not text:
             return
         log.info("Telegram: messaggio da %s: %r", chat_id, text[:120])
-        # comandi approvazione maintenance: ok / rifiuta (solo capo)
-        low = text.strip().lower()
-        if low in ("ok", "rifiuta", "rifiuto") and chat_id in config.TELEGRAM_OWNER_IDS:
-            try:
-                from app import maintenance as maint
-                state = maint._read()
-                pending = state.get("pending_proposal")
-                if not pending:
-                    self._send(chat_id, "Nessuna proposta in attesa.")
-                    return
-                pid = pending.get("id")
-                if low == "ok":
-                    ok, msg2 = maint.approve_pending(pid)
-                    self._send(chat_id, f"✅ {msg2} - {pid}", _menu_kb(Tr(chat_id)))
-                else:
-                    ok, msg2 = maint.reject_pending(pid)
-                    self._send(chat_id, f"❌ {msg2} - {pid} cancellata", _menu_kb(Tr(chat_id)))
-                return
-            except Exception as e:
-                self._send(chat_id, f"Errore: {e}")
-                return
         try:
-            fst = self._fanta_state.get(str(chat_id)) or {}
-            if fst.get("op") in ("add", "code"):
-                self._fanta_text(chat_id, text)
-            elif text.startswith("/"):
+            if text.startswith("/"):
                 self._handle_command(chat_id, text)
             else:
                 self._ask(chat_id, text)

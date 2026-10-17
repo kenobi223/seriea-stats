@@ -6,8 +6,6 @@ import time
 from flask import Flask, jsonify, request, send_from_directory
 
 import config
-from app.analysis.assistant import answer
-from app.analysis.llm import ask_ai
 from app.core import kv
 from app.core.store import Store
 
@@ -113,180 +111,6 @@ def create_app(store: Store, tunnel=None):
         if status == "already":
             return jsonify({"error": "already", "entry": entry}), 409
         return jsonify({"error": status}), 400
-
-    # ------------------------------------------------------------- fanta
-    def _fanta_code():
-        return (request.args.get("code") or
-                request.headers.get("X-Fanta-Code") or "")
-
-    @app.get("/api/fanta/players")
-    def api_fanta_players():
-        """Autocomplete giocatori Serie A (indice Sofascore cached)."""
-        from app.fanta import players as fplayers
-        q = (request.args.get("q") or "").strip()
-        out = {"players": []}
-        if len(q) >= 2:
-            try:
-                out["players"] = fplayers.search(store, q, limit=12)
-            except Exception as e:
-                log.warning("fanta search: %s", e)
-        try:
-            out["index"] = fplayers.index_status()
-        except Exception:
-            pass
-        return jsonify(out)
-
-    @app.get("/api/fanta/squad")
-    def api_fanta_squad():
-        """Rosa + modulo + XI di un utente (via codice personale)."""
-        from app.fanta import store as fstore
-        code = _fanta_code()
-        if not code:
-            return jsonify({"error": "codice mancante"}), 400
-        _key, user = fstore.get_by_code(code)
-        if not user:
-            return jsonify({"error": "codice sconosciuto"}), 404
-        return jsonify({"modulo": user.get("modulo") or "4-4-2",
-                        "mod_dif": bool(user.get("mod_dif")),
-                        "rosa": user.get("rosa") or [],
-                        "xi": user.get("xi") or [],
-                        "code": user.get("code")})
-
-    @app.post("/api/fanta/squad")
-    def api_fanta_squad_save():
-        """Aggiorna rosa/modulo/mod dif/XI (solo utenti con codice valido)."""
-        from app.fanta import store as fstore
-        body = request.get_json(silent=True) or {}
-        code = str(body.get("code") or "").strip()
-        key, user = fstore.get_by_code(code)
-        if not user:
-            return jsonify({"error": "codice sconosciuto"}), 404
-        fields = {}
-        if body.get("modulo") in fstore.MODULI:
-            fields["modulo"] = body["modulo"]
-        if "mod_dif" in body:
-            fields["mod_dif"] = bool(body["mod_dif"])
-        if isinstance(body.get("rosa"), list):
-            from app.fanta import players as fplayers
-            rosa = []
-            for p in body["rosa"][:25]:
-                if isinstance(p, dict) and p.get("id") is not None:
-                    entry = {"id": p["id"],
-                             "name": str(p.get("name") or "?"),
-                             "team": str(p.get("team") or "?"),
-                             "role": str(p.get("role") or "?")}
-                    if entry["role"] == "?" or entry["team"] == "?":
-                        fplayers.enrich(entry)
-                    rosa.append(entry)
-            fields["rosa"] = rosa
-            fields["xi"] = [x for x in (user.get("xi") or [])
-                            if x in {p["id"] for p in rosa}]
-        if isinstance(body.get("xi"), list):
-            fields["xi"] = [x for x in body["xi"][:11] if x is not None]
-        user = fstore.upsert_user(key, **fields)
-        return jsonify({"ok": True, "rosa": len(user.get("rosa") or []),
-                        "modulo": user.get("modulo"),
-                        "mod_dif": bool(user.get("mod_dif")),
-                        "xi": user.get("xi") or []})
-
-    @app.get("/api/fanta/report")
-    def api_fanta_report():
-        """Valutazione della formazione titolare (o auto-best-XI)."""
-        from app.fanta import engine as fengine
-        from app.fanta import store as fstore
-        _key, user = fstore.get_by_code(_fanta_code())
-        if not user:
-            return jsonify({"error": "codice sconosciuto"}), 404
-        try:
-            return jsonify(fengine.evaluate(store, user))
-        except Exception as e:
-            log.warning("fanta evaluate: %s", e)
-            return jsonify({"error": str(e)[:200]}), 500
-
-    @app.get("/api/fanta/suggest")
-    def api_fanta_suggest():
-        """Formazione consigliata: miglior modulo + XI per la rosa."""
-        from app.fanta import engine as fengine
-        from app.fanta import store as fstore
-        _key, user = fstore.get_by_code(_fanta_code())
-        if not user:
-            return jsonify({"error": "codice sconosciuto"}), 404
-        try:
-            return jsonify(fengine.suggest(store, user,
-                                           bool(user.get("mod_dif"))))
-        except Exception as e:
-            log.warning("fanta suggest: %s", e)
-            return jsonify({"error": str(e)[:200]}), 500
-
-    @app.post("/api/fanta/import")
-    def api_fanta_import():
-        """Importa la rosa da un CSV di Leghe Fantacalcio.
-
-        Body: {"code": "...", "csv": "<testo del file>", "replace": bool}.
-        Abbina i giocatori all'indice fantacalcio.it e salva i riconosciuti.
-        """
-        from app.fanta import importer
-        from app.fanta import players as fplayers
-        from app.fanta import store as fstore
-        body = request.get_json(silent=True) or {}
-        code = str(body.get("code") or "").strip()
-        key, user = fstore.get_by_code(code)
-        if not user:
-            return jsonify({"error": "codice sconosciuto"}), 404
-        raw = body.get("csv")
-        if not raw:
-            return jsonify({"error": "csv mancante"}), 400
-        if isinstance(raw, list):
-            raw = "\n".join(str(x) for x in raw)
-        try:
-            rows, meta = importer.parse_csv(raw)
-        except Exception as e:
-            return jsonify({"error": f"parse: {str(e)[:120]}"}), 400
-        index = fplayers.ensure_index_async(store)
-        if not index:
-            return jsonify({"error": "indice giocatori in costruzione, "
-                                     "riprova tra qualche secondo"}), 503
-        res = importer.import_rows(rows, index)
-        replace = bool(body.get("replace"))
-        add = res["matched"]
-        if replace:
-            rosa = list(add)
-        else:
-            rosa = list(user.get("rosa") or [])
-            have = {p.get("id") for p in rosa}
-            for p in add:
-                if p["id"] not in have:
-                    rosa.append({"id": p["id"], "name": p["name"],
-                                 "team": p["team"], "role": p["role"]})
-        fields = {"rosa": rosa,
-                  "xi": [x for x in (user.get("xi") or [])
-                         if x in {p["id"] for p in rosa}]}
-        fstore.upsert_user(key, **fields)
-        return jsonify({
-            "ok": True, "imported": len(add),
-            "ambiguous": res["ambiguous"], "missing": res["missing"],
-            "rosa": len(rosa), "replace": replace, "meta": meta,
-        })
-
-    @app.get("/api/fanta/debug")
-    def api_fanta_debug():
-        """Diagnostica indice fantacalcio.it (solo con MAINTENANCE_TOKEN)."""
-        if request.args.get("token") != os.environ.get(
-                "MAINTENANCE_TOKEN", "test123"):
-            return jsonify({"error": "token errato"}), 403
-        from app.fanta import players as fplayers
-        out = {"status": fplayers.index_status()}
-        cached = kv.read_json("fanta_index.json")
-        players = cached.get("players") if isinstance(cached, dict) else []
-        out["cached_n"] = len(players or [])
-        out["age_min"] = round((time.time() - (cached.get("t") or 0)) / 60, 1) \
-            if isinstance(cached, dict) and cached.get("t") else None
-        out["sample"] = (players or [])[:3]
-        roles = {}
-        for p in players or []:
-            roles[p.get("role")] = roles.get(p.get("role"), 0) + 1
-        out["roles"] = roles
-        return jsonify(out)
 
     @app.get("/api/tracking-records")
     def api_tracking_records():
@@ -414,20 +238,6 @@ def create_app(store: Store, tunnel=None):
             return jsonify({"updated": 0, "matches": []})
         return jsonify(live)
 
-    @app.post("/api/ask")
-    def api_ask():
-        """Chiede all'assistente AI una raccomandazione basata sui dati."""
-        payload = request.get_json(silent=True) or {}
-        question = (payload.get("question") or "").strip()
-        if not question:
-            return jsonify({"error": "nessuna domanda"}), 400
-        fixtures = [f for f in store.get("fixtures", [])]
-        standings = store.get("standings", [])
-        result = ask_ai(question, fixtures, standings)
-        if result is None:
-            result = answer(question, fixtures)
-        return jsonify(result)
-
     @app.get("/api/tunnel")
     def api_tunnel():
         if tunnel is None:
@@ -480,59 +290,6 @@ def create_app(store: Store, tunnel=None):
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
-    @app.get("/api/test-notify")
-    def api_test_notify():
-        """Manda subito un test a @Ziosapi con tasti OK/Rifiuta."""
-        if request.args.get("token") != os.environ.get("MAINTENANCE_TOKEN", "test123"):
-            return jsonify({"error": "token errato"}), 403
-        try:
-            from app.maintenance import _notify_owner_proposal
-            is_design = request.args.get("design") == "1"
-            if is_design:
-                proposal = {
-                    "id": "design999",
-                    "issues": ["PWA manifest mancante - sito non installabile su iPhone/Android"],
-                    "fixes": ["aggiungi manifest.json + service worker iPhone/Android"],
-                    "news": "Idea ingegnere: PWA installabile + View Transitions API (da Hacker News)",
-                    "reason": "chicca design ingegnere: migliora installazione mobile, proposta sicura",
-                }
-            else:
-                proposal = {
-                    "id": "test123",
-                    "issues": ["fixtures vuote (test)"],
-                    "fixes": ["verifica finestra 30gg ok"],
-                    "news": "Test mister: Gasperini carica la Roma",
-                    "reason": "test manuale - verifica bot @Ziosapi",
-                }
-            _notify_owner_proposal(proposal)
-            # salva come pending così puoi fare OK/Rifiuta anche sul test design
-            try:
-                from app.maintenance import _read, _write
-                import time
-                state = _read()
-                state["pending_proposal"] = {**proposal, "at": int(time.time()), "status": "pending"}
-                state["pending_fix"] = True
-                _write(state)
-            except:
-                pass
-            return jsonify({"ok": True, "sent_to": config.TELEGRAM_OWNER_IDS or ["@Ziosapi"], "proposal": proposal})
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-
-    @app.get("/api/test-maintenance")
-    def api_test_maintenance():
-        """Forza Big Pickle + Muse Spark subito e manda proposta a @Ziosapi."""
-        if request.args.get("token") != os.environ.get("MAINTENANCE_TOKEN", "test123"):
-            return jsonify({"error": "token errato, usa ?token=test123 o imposta MAINTENANCE_TOKEN"}), 403
-        try:
-            from app.maintenance import BigPickleAgent, MuseSparkAgent
-            bp = BigPickleAgent(store); bp.tick()
-            ms = MuseSparkAgent(store); ms.tick()
-            from app.maintenance import _read
-            return jsonify({"ok": True, "maintenance": _read()})
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-
     @app.get("/api/net-test")
     def api_net_test():
         """Test diretto (no Tor) dei host dati: utile per saggiare quale
@@ -561,73 +318,6 @@ def create_app(store: Store, tunnel=None):
         except Exception as e:
             out["espn_results"] = {"all": -1, "err": str(e)[:200]}
         return jsonify(out)
-
-    @app.get("/api/debug-codegen")
-    def api_debug_codegen():
-        from app.analysis.codegen import _api_key, GEMINI_BASE, MODELS, SYSTEM_PROMPT, _parse_response
-        import requests as req
-        key = _api_key()
-        if not key:
-            return jsonify({"error": "GEMINI_API_KEY non impostata", "key_set": False})
-        results = {}
-        for model in MODELS:
-            url = "%s/%s:generateContent?key=%s" % (GEMINI_BASE, model, key)
-            payload = {
-                "contents": [{"role": "user", "parts": [{"text": "RICHIEDI: cambia il colore del body in rosso\n\nFILE ATTUALI:\n=== app/web/static/style.css ===\nbody { background: #1a1a2e; color: white; }\n=== FINE ==="}]}],
-                "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-                "generationConfig": {"maxOutputTokens": 4096, "temperature": 0.2},
-            }
-            try:
-                r = req.post(url, json=payload, timeout=60)
-                raw = r.json()
-                text = ""
-                candidates = raw.get("candidates") or []
-                if candidates and isinstance(candidates[0], dict):
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    text = parts[0].get("text", "") if parts else ""
-                parsed = _parse_response(text) if text else []
-                results[model] = {
-                    "status": r.status_code,
-                    "raw_len": len(text),
-                    "raw_preview": text[:500] if text else "",
-                    "parsed": len(parsed),
-                }
-            except Exception as e:
-                results[model] = {"error": str(e)[:200]}
-        return jsonify({"key_set": True, "key_len": len(key), "results": results})
-
-    @app.get("/api/test-firecrawl")
-    def api_test_firecrawl():
-        from app.analysis.firecrawl_direttagoal import scrape_classifica, scrape_risultati
-        results = {}
-        try:
-            c = scrape_classifica()
-            results["classifica"] = {"ok": c is not None, "rows": len(c) if c else 0, "preview": str(c)[:300] if c else ""}
-        except Exception as e:
-            results["classifica"] = {"error": str(e)[:200]}
-        try:
-            r = scrape_risultati()
-            results["risultati"] = {"ok": bool(r), "count": len(r), "preview": str(r)[:300] if r else ""}
-        except Exception as e:
-            results["risultati"] = {"error": str(e)[:200]}
-        return jsonify(results)
-
-    @app.get("/api/test-mimo")
-    def api_test_mimo():
-        from app.analysis.mimo_agent import _load_complaints, _check_api_health, _check_fixtures, _check_standings, _check_predictions
-        complaints = []
-        complaints.extend(_check_api_health())
-        complaints.extend(_check_fixtures(store))
-        complaints.extend(_check_standings(store))
-        complaints.extend(_check_predictions(store))
-        saved = _load_complaints()
-        return jsonify({
-            "new_complaints": len(complaints),
-            "total_saved": len(saved.get("complaints", [])),
-            "critical": sum(1 for c in complaints if c.get("severity") == "critical"),
-            "complaints": complaints[:20],
-            "stats": saved.get("stats", {}),
-        })
 
     @app.get("/api/test-footballgpt")
     def api_test_footballgpt():

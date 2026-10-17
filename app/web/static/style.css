@@ -304,27 +304,6 @@ footer a:hover { text-decoration: underline; }
   color: var(--chip-v);
 }
 
-/* fanta */
-.fanta-rosa { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-.fanta-rosa .chip { display: inline-flex; align-items: center; gap: 2px; padding: 3px 8px; }
-.fanta-rm { background: none; border: 0; color: var(--muted); cursor: pointer;
-  font-weight: 700; font-size: 13px; line-height: 1; padding: 0 2px; }
-.fanta-rm:hover { color: var(--alert); }
-.fanta-add-row { position: relative; margin-top: 6px; }
-.fanta-ac { position: absolute; z-index: 40; left: 0; right: 0; top: calc(100% + 4px);
-  background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius);
-  overflow: hidden; box-shadow: 0 12px 32px rgba(0,0,0,.45); }
-.fanta-ac button { display: block; width: 100%; text-align: left; padding: 9px 12px;
-  background: none; border: 0; color: var(--text); cursor: pointer; font: inherit; font-size: 13px; }
-.fanta-ac button:hover { background: var(--panel-hover); }
-.fanta-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
-.fanta-row select { width: auto; padding: 7px 10px; margin-left: 6px; }
-.fanta-switch { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-.fanta-switch input { width: auto; }
-.fanta-actions { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
-.fanta-link-row { display: flex; gap: 8px; margin-top: 8px; }
-.fanta-link-row input { flex: 1; }
-
 @media (max-width: 860px) {
   .grid2, .grid3 { grid-template-columns: 1fr; }
   header { padding: 12px 16px; position: static; }

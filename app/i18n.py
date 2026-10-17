@@ -113,7 +113,6 @@ T = {
         "schedina_history_row": "Giornata {r}: {wins} vinti · {losses} persi",
         "schedina_match": "<b>{home} - {away}</b>",
         "menu_community": "👥 Community",
-        "menu_fanta": "⚽ Fanta",
         "community_title": "<b>👥 Schedina community — giornata {r}</b>",
         "community_parts": "👥 {n} partecipanti · un solo invio per giornata",
         "community_nodata": ("La schedina community si apre con le partite "
