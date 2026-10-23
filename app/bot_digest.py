@@ -347,6 +347,13 @@ def send_recaps(store):
 
 def send_all(store):
     """Punto d'ingresso per lo scheduler: entrambi i digest, best effort."""
+    # Watchdog webhook: senza webhook il bot e' cieco. L'engine lo valida a
+    # ogni ciclo (il Worker lo rimette da solo se e' sparito).
+    try:
+        requests.get(config.WORKER_API_URL + "/api/webhook-watchdog",
+                     timeout=10)
+    except Exception as e:
+        log.debug("webhook watchdog ping: %s", e)
     total = 0
     try:
         total += send_digest(store)

@@ -392,6 +392,29 @@ async function tgHandle(env, update) {
   return handleUpdate(update, env);
 }
 
+// Watchdog webhook Telegram: senza webhook il bot e' cieco (le pressioni
+// dei tasti restano in coda e non arrivano). A volte sparisce per cause
+// esterne: controlla e rimette. ~200ms, chiamato dal cron ogni 10 min e
+// dall'engine a ogni ciclo via /api/webhook-watchdog.
+async function ensureWebhook(env) {
+  if (!env.TELEGRAM_BOT_TOKEN) return false;
+  const base = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}`;
+  const want = "https://seriea-stats.lucaziello8.workers.dev/tg";
+  try {
+    const info = await (await fetch(`${base}/getWebhookInfo`, { method: "POST" })).json();
+    const cur = ((info || {}).result || {}).url || "";
+    if (cur === want) return true;
+    const params = new URLSearchParams({ url: want });
+    if (env.TG_WEBHOOK_SECRET) params.set("secret_token", env.TG_WEBHOOK_SECRET);
+    const r = await (await fetch(`${base}/setWebhook?${params}`, { method: "POST" })).json();
+    console.warn(`webhook era '${cur || "(vuoto)"}' -> rimesso: ${r && r.ok}`);
+    return !!(r && r.ok);
+  } catch (e) {
+    console.error(`ensureWebhook: ${e && e.message ? e.message : e}`);
+    return false;
+  }
+}
+
 // Dispatch del motore su GitHub Actions: e' il trigger primario ogni 10 min
 // (cron [triggers] di wrangler.toml). Il schedule nativo di engine.yml resta
 // come backup; l'anti-overlap e' garantito dal concurrency group del workflow.
@@ -452,7 +475,10 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(dispatchEngine(env));
+    ctx.waitUntil((async () => {
+      await ensureWebhook(env);
+      await dispatchEngine(env);
+    })());
   },
 };
 
@@ -468,6 +494,10 @@ async function route(request, env) {
     const state = (await redisGet(env, API_TOKENS.state)) || {};
     await maybeKickEngine(env, state);
     return json({ ok: true, updated: state.updated || 0, engine: state.engine || null });
+  }
+
+  if (path === "/api/webhook-watchdog") {
+    return json({ ok: await ensureWebhook(env) });
   }
 
   if (path === "/api/state") {

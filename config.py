@@ -230,6 +230,12 @@ TELEGRAM_OWNER_IDS = [int(x.strip()) for x in
                       os.environ.get("TELEGRAM_OWNER_IDS", "").split(",")
                       if x.strip().isdigit()]
 
+# Worker Cloudflare (sito + bot + watchdog webhook): l'engine lo pinga a
+# ogni ciclo per far verificare/rimettere il webhook Telegram.
+WORKER_API_URL = os.environ.get(
+    "WORKER_API_URL",
+    "https://seriea-stats.lucaziello8.workers.dev").rstrip("/")
+
 # Abbonamento "completo" in Telegram Stars:
 #   - gratis: 1 pronostico al giorno
 #   - completo: 50 ⭐ / 7 giorni  oppure  100 ⭐ / 30 giorni
