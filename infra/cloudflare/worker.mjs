@@ -424,6 +424,24 @@ async function dispatchEngine(env) {
   }
 }
 
+// Self-healing: se lo stato supera i 20 min di eta' (cron CF/GitHub saltati
+// o in forte ritardo) spara un dispatch al motore, al massimo ogni 15 min.
+// Lo tengono vivo il polling del dashboard (/api/state) e /api/health.
+async function maybeKickEngine(env, state) {
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    if (now - (state.updated || 0) > 1200 && env.GH_PAT) {
+      const last = Number((await redisGet(env, "seriea:last_dispatch")) || 0);
+      if (now - last > 900) {
+        await redisSet(env, "seriea:last_dispatch", now);
+        await dispatchEngine(env);
+      }
+    }
+  } catch (e) {
+    console.error(`engine kick: ${e && e.message ? e.message : e}`);
+  }
+}
+
 // ------------------------------------------------------------------ handler
 export default {
   async fetch(request, env) {
@@ -448,11 +466,13 @@ async function route(request, env) {
 
   if (path === "/api/health" || path === "/healthz") {
     const state = (await redisGet(env, API_TOKENS.state)) || {};
+    await maybeKickEngine(env, state);
     return json({ ok: true, updated: state.updated || 0, engine: state.engine || null });
   }
 
   if (path === "/api/state") {
     const state = (await redisGet(env, API_TOKENS.state)) || {};
+    await maybeKickEngine(env, state);
     return json(state);
   }
 
