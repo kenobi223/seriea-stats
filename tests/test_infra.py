@@ -317,5 +317,52 @@ class TestBotParity(unittest.TestCase):
         self.assertIn("Giornata 5", txt)
 
 
+class RoundAndMatchdayTest(unittest.TestCase):
+    """La giornata si assegna per blocchi di giorni consecutivi e la schedina
+    prende solo il turno corrente (bug: un turno infrasettimanale tirava
+    dentro il weekend successivo, es. Bologna-Monza / Udinese-AS Roma)."""
+
+    STANDINGS = {"standings": [{"played": 8}, {"played": 8}]}   # corrente = 9
+
+    @staticmethod
+    def _fx():
+        # mer 28 / gio 29 ott = turno 9; sab 31 ott-dom 2 nov = turno 10;
+        # ven 6-dom 8 nov = turno 11
+        base = 20752 * 86400       # una mezzanotte UTC: 28 ott 2026
+        def ts(day, hour):
+            return base + day * 86400 + hour * 3600
+        return [
+            {"id": "a", "home": "AC Milan", "away": "Bologna", "start_ts": ts(0, 17)},
+            {"id": "b", "home": "Parma", "away": "Udinese", "start_ts": ts(0, 19)},
+            {"id": "c", "home": "Frosinone", "away": "Lecce", "start_ts": ts(1, 19)},
+            {"id": "d", "home": "Bologna", "away": "Monza", "start_ts": ts(3, 14)},
+            {"id": "e", "home": "Udinese", "away": "AS Roma", "start_ts": ts(3, 17)},
+            {"id": "f", "home": "AS Roma", "away": "Sassuolo", "start_ts": ts(7, 19)},
+            {"id": "g", "home": "Parma", "away": "Bologna", "start_ts": ts(8, 14)},
+            {"id": "h", "home": "Como", "away": "Venezia", "start_ts": ts(9, 11)},
+        ]
+
+    def test_rounds_split_intraweek_and_weekend(self):
+        from app.analysis.schedina import assign_rounds
+        fx = assign_rounds(self.STANDINGS, self._fx())
+        rounds = {f["id"]: f["round"] for f in fx}
+        self.assertEqual((rounds["a"], rounds["b"], rounds["c"]), (9, 9, 9))
+        self.assertEqual((rounds["d"], rounds["e"]), (10, 10))
+        self.assertEqual((rounds["f"], rounds["g"], rounds["h"]), (11, 11, 11))
+
+    def test_current_matchday_stops_at_first_repeat(self):
+        from app.analysis.schedina import current_matchday
+        md = current_matchday(self._fx())
+        self.assertEqual([f["id"] for f in md], ["a", "b", "c"])   # solo turno 9
+
+    def test_current_matchday_keeps_weekend_together(self):
+        from app.analysis.schedina import current_matchday
+        fx = [f for f in self._fx() if f["id"] in ("d", "e", "f", "g", "h")]
+        md = current_matchday(fx)
+        # d,e = turno 10 (Bologna/Monza e Udinese/Roma): il turno 11 parte
+        # alla partita con AS Roma ripetuta
+        self.assertEqual([f["id"] for f in md], ["d", "e"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

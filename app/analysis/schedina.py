@@ -39,25 +39,42 @@ def current_round(store):
 
 
 def assign_rounds(store, fixtures, anchor=None):
-    """Assegna il numero di giornata a ogni fixture, per data.
+    """Assegna il numero di giornata a ogni fixture, per blocchi di giorni.
 
     ESPN non espone mai il numero di giornata. La giornata corrente è
     ``max(played)+1``; ogni fixture appartiene a quella corrente più il
-    numero di turni di distanza dal suo kickoff all'``anchor`` (kickoff del
-    primo fixture in calendario). I match già giocati ottengono turni
-    precedenti (offset negativo)."""
+    numero di *blocchi* tra il suo giorno di calendario e quello
+    dell'``anchor``. Un blocco è una serie di giorni consecutivi (es.
+    mar-gio per un turno infrasettimanale, ven-dom per il weekend): quando
+    si salta almeno un giorno si apre una nuova giornata.
+
+    Il vecchio calcolo ``offset / MATCHDAY_SPACING`` assumeva 7 giorni tra
+    i turni e quindi *fondeva* il turno infrasettimanale con quello del
+    weekend (es. 28-29 ott e 31 ott-2 nov finivano nella stessa giornata).
+    I match già giocati ottengono blocchi precedenti (offset negativo)."""
     rnd = current_round(store)
     if rnd is None:
         return fixtures
+    dated = [f for f in fixtures if f.get("start_ts")]
+    if not dated:
+        return fixtures
     if anchor is None:
-        anchor = min((f["start_ts"] for f in fixtures if f.get("start_ts")),
-                     default=None)
+        anchor = min(f["start_ts"] for f in dated)
     if not anchor:
         return fixtures
-    for f in fixtures:
-        ts = f.get("start_ts")
-        if ts:
-            f["round"] = rnd + round((ts - anchor) / config.MATCHDAY_SPACING)
+
+    def day(ts):
+        return int(ts // 86400)     # giorno UTC: i kickoff Serie A non lo scavalcano
+
+    days = sorted({day(f["start_ts"]) for f in dated} | {day(anchor)})
+    block, off = {}, 0
+    for i, d in enumerate(days):
+        if i and d - days[i - 1] > 1:   # salta almeno un giorno: nuovo turno
+            off += 1
+        block[d] = off
+    base = block[day(anchor)]
+    for f in dated:
+        f["round"] = rnd + (block[day(f["start_ts"])] - base)
     return fixtures
 
 
@@ -167,6 +184,27 @@ def _dedupe_history(history):
 
 
 # ------------------------------------------------------------------- build
+def _team(f, attr):
+    return f.get(attr) if isinstance(f, dict) else getattr(f, attr, None)
+
+
+def current_matchday(upcoming):
+    """Prefisso per kickoff senza squadre ripetute: la giornata corrente.
+
+    In un turno una squadra gioca una volta sola, quindi appena ricompare
+    una squadra si è entrati nella giornata successiva. Distingue bene il
+    turno infrasettimanale da quello del weekend che segue (una finestra
+    temporale fissa no: 3-4 giorni li coprono entrambi)."""
+    out, used = [], set()
+    for f in upcoming:
+        teams = {_team(f, "home"), _team(f, "away")}
+        if teams & used:
+            break
+        out.append(f)
+        used |= teams
+    return out
+
+
 def build(store, now_fx):
     """Crea la schedina del turno se non esiste già e le partite non sono
     ancora iniziate. Archivia la schedina del turno precedente."""
@@ -191,10 +229,16 @@ def build(store, now_fx):
             and cur.get("v") == SCHEDINA_VERSION:
         return cur
 
-    # la finestra di 10 giorni di next_fixtures può spanciare due turni:
-    # seleziona solo le partite della prima giornata in arrivo
-    from_ts = upcoming[0].start_ts
-    in_round = [f for f in upcoming if f.start_ts - from_ts < config.MATCHDAY_WINDOW]
+    # solo le partite della giornata corrente: si prende il prefisso per
+    # kickoff senza squadre ripetute (in un turno ogni squadra gioca una
+    # volta sola), così un turno infrasettimanale non "tira dentro" quello
+    # del weekend successivo (bug: Bologna-Monza/Udinese-Roma in schedina 9)
+    in_round = current_matchday(upcoming)
+    if len(in_round) < 2:
+        # fallback: dati sfasati -> vecchia finestra temporale
+        from_ts = upcoming[0].start_ts
+        in_round = [f for f in upcoming
+                    if f.start_ts - from_ts < config.MATCHDAY_WINDOW]
 
     picks = _select(_candidates(in_round))
     if not picks:
